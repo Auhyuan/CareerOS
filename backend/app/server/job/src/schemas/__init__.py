@@ -1,3 +1,4 @@
+from app.server.job.src.schemas.request import JobPostingSearchRequest
 from app.server.job.src.schemas.response import (
     JobPostingListResponse,
     JobPostingResponse,
@@ -5,6 +6,7 @@ from app.server.job.src.schemas.response import (
 )
 
 __all__ = [
+    "JobPostingSearchRequest",
     "JobPostingResponse",
     "JobPostingListResponse",
     "JobRawRecordResponse",

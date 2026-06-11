@@ -6,6 +6,7 @@ from sqlmodel import Session
 from app.common.core.exceptions import BusinessException
 from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
+from app.server.job.src.schemas.request import JobPostingSearchRequest
 from app.server.job.src.schemas.response import (
     JobPostingListResponse,
     JobPostingResponse,
@@ -24,36 +25,23 @@ def job_health():
     return Result.success({"service": "job", "status": "ok"})
 
 
-@router.get("/postings", response_model=Result[JobPostingListResponse], summary="查询岗位列表")
-def list_job_postings(
-    keyword: str | None = None,
-    city: str | None = None,
-    platform: str | None = None,
-    status: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
-    db: Session = Depends(get_postgres_engine),
-):
+@router.post("/postings/search", response_model=Result[JobPostingListResponse], summary="查询岗位列表")
+def search_job_postings(request: JobPostingSearchRequest, db: Session = Depends(get_postgres_engine)):
     """
     分页查询岗位库。
 
     Args:
-        keyword: 岗位标题关键词。
-        city: 城市筛选。
-        platform: 平台筛选，例如 qcwy。
-        status: 岗位状态筛选，例如 recruiting。
-        page: 当前页码。
-        page_size: 每页数量。
+        request: 岗位列表查询条件。
         db: 数据库会话。
     """
     result = job_service.list_postings(
         db,
-        keyword=keyword,
-        city=city,
-        platform=platform,
-        status=status,
-        page=page,
-        page_size=page_size,
+        keyword=request.keyword,
+        city=request.city,
+        platform=request.platform,
+        status=request.status,
+        page=request.page,
+        page_size=request.page_size,
     )
     return Result.success(result)
 
