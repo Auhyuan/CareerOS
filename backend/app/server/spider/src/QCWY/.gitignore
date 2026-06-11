@@ -1,8 +1,0 @@
-__pycache__/
-*.pyc
-data/
-data_test/
-.browser_profile/
-.env
-.env.local
-debug/

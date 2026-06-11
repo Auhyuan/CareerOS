@@ -22,6 +22,8 @@ ENV/
 # Browser automation runtime data
 .browser_profile/
 **/.browser_profile/
+.runtime/
+**/.runtime/
 
 # Spider outputs and generated datasets
 data/

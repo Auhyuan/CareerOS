@@ -1,57 +1,51 @@
-# ----------------postgres数据库操作-------------------
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, create_engine
-from app.common.config.datebase_config import postgres_connection_string
+
+from app.common.config.database_config import postgres_connection_string
 
 
-# 创建全局唯一的数据库引擎
-# check_same_thread=False 仅用于 SQLite，PostgreSQL 不需要
+# 创建全局 PostgreSQL 数据库引擎。
+# 说明：FastAPI 每个请求会通过 get_postgres_engine 获取独立 Session，底层连接由连接池复用。
 engine = create_engine(
     postgres_connection_string,
-    pool_pre_ping=True,  # 连接池健康检查
-    pool_size=10,        # 连接池大小
-    max_overflow=20,      # 最大溢出连接数
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
 )
 
 
-def get_postgres_engine(): 
+def check_postgres_health() -> None:
     """
-    FastAPI 依赖注入使用的生成器
+    检查 PostgreSQL 是否可连接。
+
+    服务启动时会调用该函数；如果连接失败，直接抛出 RuntimeError 阻止服务启动。
     """
-    # 使用with语句确保数据库会话在请求结束后自动关闭
+    try:
+        with Session(engine) as db:
+            # select 1 是最小健康检查，只验证数据库连接、账号、密码、库名是否可用。
+            db.exec(text("select 1")).one()
+    except SQLAlchemyError as error:
+        raise RuntimeError(f"PostgreSQL 健康检查失败: {error}") from error
+    except UnicodeDecodeError as error:
+        # 某些 Windows/PostgreSQL 组合在连接错误信息为中文时可能触发编码异常。
+        raise RuntimeError("PostgreSQL 健康检查失败，请检查账号、密码、端口、库名或 pg_hba.conf。") from error
+
+
+def get_postgres_engine():
+    """
+    FastAPI 依赖注入使用的数据库 Session 生成器。
+
+    请求结束后，with 语句会自动关闭 Session，避免连接泄露。
+    """
     with Session(engine) as db:
         yield db
 
 
 def get_db_session() -> Session:
     """
-    普通函数调用使用的 Session 工厂
-    注意：调用者需要手动关闭 Session (使用 with 语句或 .close())
+    普通函数调用使用的数据库 Session 工厂。
+
+    调用方需要自行关闭 Session，推荐使用 with get_db_session() as db。
     """
     return Session(engine)
-        
-
-# if __name__ == "__main__":
-#     # 测试数据库连接
-#     postgres_db_CONFIG = {
-#     "host": "192.168.8.151",
-#     "port": 5432,
-#     "username": "remote_super",
-#     "password": "himice2024",
-#     "database": "agent",
-# }
-
-#     connection_string = f"postgresql://{postgres_db_CONFIG['username']}:{postgres_db_CONFIG['password']}@{postgres_db_CONFIG['host']}:{postgres_db_CONFIG['port']}/{postgres_db_CONFIG['database']}"
-#     manager = PostgresDatabase(connection_string)
-#     print(manager.get_table_name())
-#     print(manager.insert_file_info({
-#         "id": "123456",
-#         "name": "test.txt",
-#         "path": "/tmp/test.txt",
-#         "out_time": "2024-01-01",
-#         "size": 1024,
-#         "extension": "txt",
-#         "mime_type": "text/plain",
-#         "created_by": "user123",
-#         "created_at": "2024-01-01 00:00:00"
-#     }))
-#     print(manager.get_file_info("123456"))
