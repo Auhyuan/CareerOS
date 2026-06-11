@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
+from app.common.core.exceptions import BusinessException
 from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
 from app.server.job.src.schemas.response import (
@@ -19,11 +20,7 @@ job_service = JobService()
 
 @router.get("/health", response_model=Result[Any], summary="岗位库服务健康检查")
 def job_health():
-    """
-    岗位库服务健康检查接口。
-
-    用于确认 job 服务模块已经被 FastAPI 正常注册。
-    """
+    """岗位库服务健康检查接口。"""
     return Result.success({"service": "job", "status": "ok"})
 
 
@@ -72,7 +69,7 @@ def get_job_posting(job_id: int, db: Session = Depends(get_postgres_engine)):
     """
     job = job_service.get_posting_detail(db, job_id)
     if job is None:
-        return Result.fail(404, "岗位不存在")
+        raise BusinessException(code=404, msg="岗位不存在")
     return Result.success(job)
 
 

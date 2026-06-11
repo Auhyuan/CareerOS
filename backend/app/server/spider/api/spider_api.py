@@ -16,11 +16,7 @@ spider_service = SpiderService()
 
 @router.get("/health", response_model=Result[Any], summary="爬虫服务健康检查")
 def spider_health():
-    """
-    爬虫服务健康检查接口。
-
-    用于确认 spider 服务模块已经被 FastAPI 正常注册。
-    """
+    """爬虫服务健康检查接口。"""
     return Result.success({"service": "spider", "status": "ok"})
 
 
@@ -33,8 +29,5 @@ def crawl_qcwy_jobs(request: QcwyJobCrawlRequest, db: Session = Depends(get_post
         request: 前程无忧岗位采集请求参数。
         db: 数据库会话。
     """
-    try:
-        result = spider_service.crawl_qcwy_jobs(request, db)
-        return Result.success(result)
-    except Exception as error:
-        return Result.fail(500, f"前程无忧岗位采集失败: {str(error)}")
+    result = spider_service.crawl_qcwy_jobs(request, db)
+    return Result.success(result)
