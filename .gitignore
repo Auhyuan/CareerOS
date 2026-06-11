@@ -1,0 +1,71 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Browser automation runtime data
+.browser_profile/
+**/.browser_profile/
+
+# Spider outputs and generated datasets
+data/
+data_test/
+**/data/
+**/data_test/
+**/debug/
+*.csv
+*.xlsx
+*.xls
+
+# Browser / test reports
+playwright-report/
+test-results/
+
+# Logs
+*.log
+logs/
+tmp/
+temp/
+*.pid
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# LangGraph / agent runtime artifacts
+.langgraph_api/
+*.pckl
+*.pckl.tmp
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
