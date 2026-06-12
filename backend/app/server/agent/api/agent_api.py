@@ -82,7 +82,7 @@ def get_agent_capabilities():
                 "middleware_factory",
                 "runtime_context_schema",
                 "memory_placeholder",
-                "checkpoint_placeholder",
+                "postgres_checkpointer",
                 "graph_builder_placeholder",
             ],
         )

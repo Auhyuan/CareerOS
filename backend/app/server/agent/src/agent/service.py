@@ -1,3 +1,5 @@
+import inspect
+
 from app.server.agent.src.agent.assembly import AgentAssembly
 from app.server.agent.src.checkpoint import AgentCheckpointService
 from app.server.agent.src.context import AgentContextService
@@ -89,7 +91,7 @@ class AgentService:
             features=features,
         )
 
-    def assemble_agent(self, request: AgentRunRequest, context: AgentRuntimeContext) -> AgentAssembly:
+    async def assemble_agent(self, request: AgentRunRequest, context: AgentRuntimeContext) -> AgentAssembly:
         """
         组装 LangChain Agent。
 
@@ -145,6 +147,7 @@ class AgentService:
                     "tool_count": len(tools),
                     "middlewares": middleware_names,
                     "context_schema": context_schema.__name__,
+                    "checkpointer_enabled": False,
                 },
             )
 
@@ -162,6 +165,12 @@ class AgentService:
         # 中间件会横切模型调用和工具调用，例如工具异常处理、工具日志、工具参数注入、记忆注入等。
         middlewares = self.middleware_factory.build_langchain_middlewares(build_config.features)
 
+        # 按需获取 LangGraph checkpointer。
+        # Checkpointer 保存的是 LangGraph 图状态，不替代 ContextService 的历史消息表。
+        checkpointer = None
+        if build_config.features.enable_checkpointer:
+            checkpointer = await self.checkpoint_service.get_checkpointer()
+
         try:
             from langchain.agents import create_agent
         except ImportError as error:
@@ -174,13 +183,20 @@ class AgentService:
         # system_prompt 控制“角色、目标和约束”；
         # context_schema 控制“运行时上下文结构”；
         # middleware 控制“模型/工具调用链路上的横切能力”。
-        agent = create_agent(
-            model=model,
-            tools=tools,
-            system_prompt=system_prompt,
-            context_schema=context_schema,
-            middleware=middlewares,
-        )
+        create_agent_kwargs = {
+            "model": model,
+            "tools": tools,
+            "system_prompt": system_prompt,
+            "context_schema": context_schema,
+            "middleware": middlewares,
+        }
+        if checkpointer is not None:
+            create_agent_signature = inspect.signature(create_agent)
+            if "checkpointer" not in create_agent_signature.parameters:
+                raise RuntimeError("当前 LangChain create_agent 不支持 checkpointer 参数，请升级 langchain/langgraph。")
+            create_agent_kwargs["checkpointer"] = checkpointer
+
+        agent = create_agent(**create_agent_kwargs)
 
         return AgentAssembly(
             agent=agent,
@@ -195,6 +211,7 @@ class AgentService:
                 "tool_count": len(tools),
                 "middlewares": middleware_names,
                 "context_schema": context_schema.__name__,
+                "checkpointer_enabled": checkpointer is not None,
             },
         )
 
@@ -237,7 +254,7 @@ class AgentService:
 
         # 第二步：组装 agent。
         # assemble_agent 只负责“把零件装起来”，不负责解释业务结果。
-        assembly = self.assemble_agent(request, context)
+        assembly = await self.assemble_agent(request, context)
 
         # dry_run 直接返回装配信息，方便我们调试平台型 agent 的结构。
         if request.dry_run:
