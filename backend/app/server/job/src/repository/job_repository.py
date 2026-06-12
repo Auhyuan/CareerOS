@@ -1,10 +1,16 @@
 from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlmodel import Session, col, select
 
-from app.server.job.src.models.job_model import JobPosting, JobRawRecord, SpiderCrawlRun
+from app.server.job.src.models.job_model import (
+    JobDirection,
+    JobMarketProfile,
+    JobPosting,
+    JobRawRecord,
+    SpiderCrawlRun,
+)
 
 
 class JobRepository:
@@ -226,3 +232,68 @@ class JobRepository:
             .limit(limit)
         )
         return list(db.exec(sql).all())
+
+    def list_directions(
+        self,
+        db: Session,
+        *,
+        keyword: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[JobDirection], int]:
+        """
+        分页查询平台岗位方向。
+
+        Args:
+            db: 数据库会话。
+            keyword: 岗位方向关键词，会匹配名称、编码和描述。
+            status: 岗位方向状态，例如 active。
+            page: 当前页码。
+            page_size: 每页数量。
+        """
+        filters = []
+        if keyword:
+            like_keyword = f"%{keyword}%"
+            filters.append(
+                or_(
+                    col(JobDirection.name).ilike(like_keyword),
+                    col(JobDirection.code).ilike(like_keyword),
+                    col(JobDirection.description).ilike(like_keyword),
+                )
+            )
+        if status:
+            filters.append(JobDirection.status == status)
+
+        base_sql = select(JobDirection)
+        count_sql = select(func.count()).select_from(JobDirection)
+        for query_filter in filters:
+            base_sql = base_sql.where(query_filter)
+            count_sql = count_sql.where(query_filter)
+
+        offset = (page - 1) * page_size
+        list_sql = base_sql.order_by(JobDirection.updated_at.desc()).offset(offset).limit(page_size)
+        rows = list(db.exec(list_sql).all())
+        total = db.exec(count_sql).one()
+        return rows, int(total)
+
+    def get_direction_by_id(self, direction_id: int, db: Session) -> JobDirection | None:
+        """
+        根据岗位方向 ID 查询岗位方向详情。
+
+        Args:
+            direction_id: 岗位方向 ID。
+            db: 数据库会话。
+        """
+        return db.get(JobDirection, direction_id)
+
+    def get_profile_by_direction_id(self, direction_id: int, db: Session) -> JobMarketProfile | None:
+        """
+        根据岗位方向 ID 查询聚合岗位画像。
+
+        Args:
+            direction_id: 岗位方向 ID。
+            db: 数据库会话。
+        """
+        sql = select(JobMarketProfile).where(JobMarketProfile.direction_id == direction_id)
+        return db.exec(sql).first()

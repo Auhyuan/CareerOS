@@ -16,6 +16,11 @@ psycopg2-binary==2.9.11
 requests==2.32.5
 playwright==1.56.0
 
+# LangChain / LangGraph
+langchain>=1.1
+langchain-openai>=1.0.1
+langgraph>=1.0.0
+
 # Spider output files
 pandas==2.3.3
 openpyxl==3.1.5

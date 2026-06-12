@@ -6,8 +6,11 @@ from sqlmodel import Session
 from app.common.core.exceptions import BusinessException
 from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
-from app.server.job.src.schemas.request import JobPostingSearchRequest
+from app.server.job.src.schemas.request import JobDirectionSearchRequest, JobPostingSearchRequest
 from app.server.job.src.schemas.response import (
+    JobDirectionListResponse,
+    JobDirectionResponse,
+    JobMarketProfileResponse,
     JobPostingListResponse,
     JobPostingResponse,
     JobRawRecordResponse,
@@ -23,6 +26,63 @@ job_service = JobService()
 def job_health():
     """岗位库服务健康检查接口。"""
     return Result.success({"service": "job", "status": "ok"})
+
+
+@router.post("/directions/search", response_model=Result[JobDirectionListResponse], summary="查询岗位方向列表")
+def search_job_directions(request: JobDirectionSearchRequest, db: Session = Depends(get_postgres_engine)):
+    """
+    分页查询平台定义的岗位方向。
+
+    Args:
+        request: 岗位方向查询条件。
+        db: 数据库会话。
+    """
+    result = job_service.list_directions(
+        db,
+        keyword=request.keyword,
+        status=request.status,
+        page=request.page,
+        page_size=request.page_size,
+    )
+    return Result.success(result)
+
+
+@router.get("/directions/{direction_id}", response_model=Result[JobDirectionResponse], summary="查询岗位方向详情")
+def get_job_direction(direction_id: int, db: Session = Depends(get_postgres_engine)):
+    """
+    查询岗位方向详情。
+
+    Args:
+        direction_id: 岗位方向 ID。
+        db: 数据库会话。
+    """
+    direction = job_service.get_direction_detail(db, direction_id)
+    if direction is None:
+        raise BusinessException(code=404, msg="岗位方向不存在")
+    return Result.success(direction)
+
+
+@router.get(
+    "/directions/{direction_id}/profile",
+    response_model=Result[JobMarketProfileResponse],
+    summary="查询岗位方向聚合画像",
+)
+def get_job_direction_profile(direction_id: int, db: Session = Depends(get_postgres_engine)):
+    """
+    查询某个岗位方向的聚合画像。
+
+    Args:
+        direction_id: 岗位方向 ID。
+        db: 数据库会话。
+    """
+    direction = job_service.get_direction_detail(db, direction_id)
+    if direction is None:
+        raise BusinessException(code=404, msg="岗位方向不存在")
+
+    profile = job_service.get_profile_by_direction_id(db, direction_id)
+    if profile is None:
+        raise BusinessException(code=404, msg="岗位画像不存在")
+    return Result.success(profile)
 
 
 @router.post("/postings/search", response_model=Result[JobPostingListResponse], summary="查询岗位列表")

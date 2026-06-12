@@ -72,3 +72,50 @@ class JobRawRecordResponse(BaseModel):
     content_hash: str | None = None
     collected_at: datetime
     created_at: datetime
+
+
+class JobDirectionResponse(BaseModel):
+    """岗位方向响应模型。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    code: str | None = None
+    description: str | None = None
+    parent_id: int | None = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobDirectionListResponse(BaseModel):
+    """岗位方向分页列表响应模型。"""
+
+    items: list[JobDirectionResponse] = Field(default_factory=list, description="岗位方向列表")
+    total: int = Field(description="符合条件的岗位方向总数")
+    page: int = Field(description="当前页码")
+    page_size: int = Field(description="每页数量")
+
+
+class JobMarketProfileResponse(BaseModel):
+    """岗位聚合画像响应模型。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    direction_id: int
+    job_name: str
+    job_overview: str | None = None
+    responsibilities: list[Any] | None = None
+    required_skills: list[Any] | None = None
+    preferred_skills: list[Any] | None = None
+    education_requirement: str | None = None
+    experience_requirement: str | None = None
+    certificate_requirement: str | None = None
+    source_job_ids: list[Any] | None = None
+    source_filters: dict[str, Any] | None = None
+    model_name: str | None = None
+    analysis_version: str | None = None
+    created_at: datetime
+    updated_at: datetime

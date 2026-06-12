@@ -118,3 +118,46 @@ class JobRequirementAnalysis(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=now_time)
     updated_at: datetime = Field(default_factory=now_time)
+
+
+class JobDirection(SQLModel, table=True):
+    """平台定义的岗位方向表模型，对应 job_directions。"""
+
+    __tablename__ = "job_directions"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=255)
+    code: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None)
+    parent_id: int | None = Field(default=None, foreign_key="job_directions.id")
+    status: str = Field(default="active", max_length=30)
+    created_at: datetime = Field(default_factory=now_time)
+    updated_at: datetime = Field(default_factory=now_time)
+
+
+class JobMarketProfile(SQLModel, table=True):
+    """岗位聚合画像表模型，对应 job_market_profiles。"""
+
+    __tablename__ = "job_market_profiles"
+
+    id: int | None = Field(default=None, primary_key=True)
+    direction_id: int = Field(foreign_key="job_directions.id")
+    job_name: str = Field(max_length=255)
+
+    job_overview: str | None = Field(default=None)
+    responsibilities: list[Any] | None = Field(default=None, sa_column=Column(JSONB))
+    required_skills: list[Any] | None = Field(default=None, sa_column=Column(JSONB))
+    preferred_skills: list[Any] | None = Field(default=None, sa_column=Column(JSONB))
+
+    education_requirement: str | None = Field(default=None)
+    experience_requirement: str | None = Field(default=None)
+    certificate_requirement: str | None = Field(default=None)
+
+    source_job_ids: list[Any] | None = Field(default=None, sa_column=Column(JSONB))
+    source_filters: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
+
+    model_name: str | None = Field(default=None, max_length=100)
+    analysis_version: str | None = Field(default=None, max_length=50)
+
+    created_at: datetime = Field(default_factory=now_time)
+    updated_at: datetime = Field(default_factory=now_time)

@@ -3,8 +3,8 @@ import sys
 from pathlib import Path
 
 
-# 支持从 backend 目录下直接执行：python app/main.py。
-# 直接按文件运行时，Python 默认只把 backend/app 加进 sys.path；
+# 支持在 backend 目录下直接执行：python app/main.py。
+# 直接按文件运行时，Python 默认只会把 backend/app 加入 sys.path，
 # 这里手动补上 backend 根目录，保证 from app.xxx import xxx 可以正常工作。
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -18,12 +18,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.common.core.exceptions import register_exception_handlers
 from app.common.core.lifespan import app_lifespan
 from app.common.schemas.result import Result
+from app.server.agent.api import router as agent_router
 from app.server.job.api import router as job_router
 from app.server.spider.api import router as spider_router
 
 
 def create_app() -> FastAPI:
-    """创建 FastAPI 应用实例，并注册所有功能模块路由。"""
+    """
+    创建 FastAPI 应用实例，并注册所有功能模块路由。
+
+    Returns:
+        已经完成中间件、异常处理器和业务路由注册的 FastAPI 应用。
+    """
     app = FastAPI(lifespan=app_lifespan)
 
     # 当前阶段由 Java 侧做权限管理，这里只负责功能接口，所以先允许跨域调用。
@@ -41,10 +47,16 @@ def create_app() -> FastAPI:
     # 每个服务模块只通过自己的 api 聚合出口对外暴露接口。
     app.include_router(spider_router, prefix="/spider", tags=["spider模块"])
     app.include_router(job_router, prefix="/job", tags=["job模块"])
+    app.include_router(agent_router, prefix="/agent", tags=["agent模块"])
 
     @app.get("/")
     def root_endpoint():
-        """统一入口健康检查。"""
+        """
+        统一入口健康检查。
+
+        Returns:
+            当前后端服务的基础状态。
+        """
         return Result.success({"message": "统一入口"})
 
     return app
@@ -71,8 +83,8 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "app.main:create_app",
-        host=os.getenv("FastApi_host", "127.0.0.1"),
-        port=int(os.getenv("FastApi_port", 8090)),
+        host=os.getenv("FASTAPI_HOST", "127.0.0.1"),
+        port=int(os.getenv("FASTAPI_PORT", 8090)),
         loop="asyncio",
         workers=1,
         reload=True,

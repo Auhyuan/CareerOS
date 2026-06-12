@@ -10,3 +10,12 @@ class JobPostingSearchRequest(BaseModel):
     status: str | None = Field(default=None, description="岗位状态筛选，例如 recruiting")
     page: int = Field(default=1, ge=1, description="当前页码")
     page_size: int = Field(default=20, ge=1, le=100, description="每页数量")
+
+
+class JobDirectionSearchRequest(BaseModel):
+    """岗位方向查询请求模型。"""
+
+    keyword: str | None = Field(default=None, description="岗位方向关键词")
+    status: str | None = Field(default="active", description="岗位方向状态")
+    page: int = Field(default=1, ge=1, description="当前页码")
+    page_size: int = Field(default=20, ge=1, le=100, description="每页数量")
