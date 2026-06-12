@@ -13,7 +13,7 @@ def create_agent_context_schema() -> type[BaseModel]:
     return create_model(
         "DynamicAgentRuntimeContext",
         __base__=BaseModel,
-        agent_name=(str, Field(default="default", description="Agent 名称")),
+        agent_id=(str, Field(default="default", description="Agent 稳定业务 ID")),
         thread_id=(str, Field(default="", description="会话线程 ID")),
         query=(str, Field(default="", description="本次运行任务")),
         sys_var=(dict[str, Any], Field(default_factory=dict, description="系统变量")),

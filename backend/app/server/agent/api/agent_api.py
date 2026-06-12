@@ -1,5 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlmodel import Session
 
+from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
 from app.server.agent.src.agent import AgentService
 from app.server.agent.src.model import get_model_config
@@ -64,6 +66,7 @@ def get_agent_capabilities():
                 "schemas",
                 "prompts",
                 "tools",
+                "templates",
                 "runtime",
                 "middlewares",
                 "memory",
@@ -75,6 +78,7 @@ def get_agent_capabilities():
                 "embedding_model_placeholder",
                 "prompt_rendering",
                 "tool_registry_placeholder",
+                "agent_template_management",
                 "middleware_factory",
                 "runtime_context_schema",
                 "memory_placeholder",
@@ -86,7 +90,7 @@ def get_agent_capabilities():
 
 
 @router.post("/run", response_model=Result[AgentRunResponse], summary="运行通用 Agent")
-async def run_agent(request: AgentRunRequest):
+async def run_agent(request: AgentRunRequest, db: Session = Depends(get_postgres_engine)):
     """
     运行通用 Agent。
 
@@ -96,5 +100,5 @@ async def run_agent(request: AgentRunRequest):
     Returns:
         Agent 运行结果。dry_run=true 时只返回装配信息，不真实调用模型。
     """
-    result = await agent_service.run(request)
+    result = await agent_service.run(request, db)
     return Result.success(result)

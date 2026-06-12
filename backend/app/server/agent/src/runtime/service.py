@@ -20,14 +20,13 @@ class AgentRuntimeContextService:
         """
         thread_id = request.conversation_id or request.request_id or uuid4().hex
         sys_var = {
-            "user_id": request.user_id or "",
             "request_id": request.request_id or "",
             "thread_id": thread_id,
         }
         optional_features = request.optional_features.model_dump()
 
         return AgentRuntimeContext(
-            agent_name=request.agent_name,
+            agent_id=request.agent_id,
             thread_id=thread_id,
             query=request.query,
             sys_var=sys_var,

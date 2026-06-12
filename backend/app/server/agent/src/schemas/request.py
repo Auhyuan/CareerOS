@@ -29,10 +29,9 @@ class AgentOptionalFeatures(BaseModel):
 class AgentRunRequest(BaseModel):
     """通用 Agent 运行请求模型。"""
 
-    agent_name: str = Field(default="default", description="Agent 名称")
+    agent_id: str = Field(default="default", description="Agent 稳定业务 ID")
     query: str = Field(..., min_length=1, description="用户输入或编排层传入的任务指令")
     conversation_id: str | None = Field(default=None, description="会话 ID 或任务线程 ID")
-    user_id: str | None = Field(default=None, description="调用方用户 ID")
     request_id: str | None = Field(default=None, description="调用方请求 ID")
     system_prompt: str | None = Field(default=None, description="本次运行使用的系统提示词")
     inputs: dict[str, Any] = Field(default_factory=dict, description="编排层注入的业务变量")

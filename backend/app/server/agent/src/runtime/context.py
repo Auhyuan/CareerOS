@@ -6,10 +6,10 @@ from pydantic import BaseModel, Field
 class AgentRuntimeContext(BaseModel):
     """Agent 单次运行上下文。"""
 
-    agent_name: str = Field(default="default", description="Agent 名称")
+    agent_id: str = Field(default="default", description="Agent 稳定业务 ID")
     thread_id: str = Field(default="", description="会话线程 ID")
     query: str = Field(default="", description="本次运行的用户问题或任务指令")
-    sys_var: dict[str, Any] = Field(default_factory=dict, description="系统变量，例如 user_id、request_id")
+    sys_var: dict[str, Any] = Field(default_factory=dict, description="系统变量，例如 request_id、thread_id")
     user_var: dict[str, Any] = Field(default_factory=dict, description="用户变量或编排层输入变量")
     inputs: dict[str, Any] = Field(default_factory=dict, description="业务输入变量")
     files: list[dict[str, Any]] = Field(default_factory=list, description="附件上下文")

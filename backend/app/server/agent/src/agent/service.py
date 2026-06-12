@@ -1,5 +1,6 @@
 from app.server.agent.src.agent.assembly import AgentAssembly
 from app.server.agent.src.checkpoint import AgentCheckpointService
+from app.server.agent.src.context import AgentContextService
 from app.server.agent.src.memory import AgentMemoryService
 from app.server.agent.src.middlewares import MiddlewareFactory
 from app.server.agent.src.model import AgentModelService
@@ -9,6 +10,7 @@ from app.server.agent.src.schemas.config import AgentBuildConfig, AgentFeatureCo
 from app.server.agent.src.schemas.request import AgentRunRequest
 from app.server.agent.src.schemas.response import AgentRunResponse
 from app.server.agent.src.tools import AgentToolService
+from sqlmodel import Session
 
 
 class AgentService:
@@ -37,6 +39,7 @@ class AgentService:
         middleware_factory: MiddlewareFactory | None = None,
         memory_service: AgentMemoryService | None = None,
         checkpoint_service: AgentCheckpointService | None = None,
+        context_service: AgentContextService | None = None,
     ):
         """
         初始化平台通用 Agent 服务。
@@ -57,6 +60,7 @@ class AgentService:
         self.middleware_factory = middleware_factory or MiddlewareFactory()
         self.memory_service = memory_service or AgentMemoryService()
         self.checkpoint_service = checkpoint_service or AgentCheckpointService()
+        self.context_service = context_service or AgentContextService()
 
     def build_config_from_request(self, request: AgentRunRequest) -> AgentBuildConfig:
         """
@@ -79,7 +83,7 @@ class AgentService:
         )
 
         return AgentBuildConfig(
-            agent_name=request.agent_name,
+            agent_id=request.agent_id,
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
             tool_names=request.tools,
             features=features,
@@ -194,7 +198,7 @@ class AgentService:
             },
         )
 
-    async def run(self, request: AgentRunRequest) -> AgentRunResponse:
+    async def run(self, request: AgentRunRequest, db: Session | None = None) -> AgentRunResponse:
         """
         运行通用 Agent。
 
@@ -209,6 +213,28 @@ class AgentService:
         # 比如工具参数注入中间件后续会从 context.sys_var / context.user_var 里拿参数。
         context = self.runtime_context_service.build_context(request)
 
+        # 如果本次开启短期上下文，就先保证会话存在，并把最近历史消息加载出来。
+        # 注意：这里依赖 PostgreSQL Session，所以 API 层需要把 db 传入；
+        # 如果调用方没有传 db，则跳过上下文持久化，避免 agent 服务在非 Web 场景下无法运行。
+        # dry_run 只用于检查装配结果，不应该产生会话记录或消息记录。
+        context_enabled = request.optional_features.short_term_context_enabled and db is not None and not request.dry_run
+        history_messages = []
+        if context_enabled:
+            self.context_service.ensure_conversation(
+                db,
+                conversation_id=context.thread_id,
+                metadata={
+                    "request_id": request.request_id,
+                    "source": "agent_run",
+                },
+            )
+            recent_messages = self.context_service.get_recent_messages(
+                db,
+                conversation_id=context.thread_id,
+                limit=20,
+            )
+            history_messages = self.context_service.to_langchain_messages(recent_messages)
+
         # 第二步：组装 agent。
         # assemble_agent 只负责“把零件装起来”，不负责解释业务结果。
         assembly = self.assemble_agent(request, context)
@@ -219,7 +245,7 @@ class AgentService:
                 answer="Agent 装配骨架已就绪，当前为 dry_run，未真实调用模型。",
                 metadata={
                     **assembly.metadata,
-                    "agent_name": context.agent_name,
+                    "agent_id": context.agent_id,
                     "thread_id": context.thread_id,
                     "allowed_tools": context.allowed_tools,
                     "system_prompt_preview": assembly.system_prompt[:120],
@@ -230,8 +256,26 @@ class AgentService:
         # messages 是 LangChain agent 的标准输入；
         # config.configurable.thread_id 后续用于 checkpointer / LangGraph 状态恢复；
         # context 是传给中间件和 runtime 使用的结构化上下文。
+        # 如果开启短期上下文，则把历史消息拼在本轮用户问题之前。
+        # 为了避免重复，本轮用户问题只在模型调用前加入 messages，调用成功后再写入数据库。
+        input_messages = [
+            *history_messages,
+            {"role": "user", "content": request.query},
+        ]
+
+        if context_enabled:
+            self.context_service.add_user_message(
+                db,
+                conversation_id=context.thread_id,
+                content=request.query,
+                metadata={
+                    "request_id": request.request_id,
+                    "agent_id": context.agent_id,
+                },
+            )
+
         result = await assembly.agent.ainvoke(
-            {"messages": [{"role": "user", "content": request.query}]},
+            {"messages": input_messages},
             config={"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50},
             context=context.to_langchain_context(),
         )
@@ -243,6 +287,18 @@ class AgentService:
         # 第五步：把交互交给记忆服务。
         # 当前 MemoryService 还是占位实现，后续可以在这里异步更新长期记忆。
         await self.memory_service.save_interaction(context, answer)
+
+        if context_enabled:
+            self.context_service.add_assistant_message(
+                db,
+                conversation_id=context.thread_id,
+                content=answer,
+                metadata={
+                    "request_id": request.request_id,
+                    "agent_id": context.agent_id,
+                    "structured_output_exists": bool(result.get("structured_response") or result.get("structured_output")),
+                },
+            )
 
         return AgentRunResponse(
             answer=answer,

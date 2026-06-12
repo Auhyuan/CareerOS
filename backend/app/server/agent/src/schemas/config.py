@@ -19,7 +19,7 @@ class AgentFeatureConfig(BaseModel):
 class AgentBuildConfig(BaseModel):
     """Agent 装配配置。"""
 
-    agent_name: str = Field(default="default", description="Agent 名称")
+    agent_id: str = Field(default="default", description="Agent 稳定业务 ID")
     system_prompt: str | None = Field(default=None, description="系统提示词")
     tool_names: list[str] = Field(default_factory=list, description="允许加载的工具名称")
     features: AgentFeatureConfig = Field(default_factory=AgentFeatureConfig, description="Agent 内部装配能力开关")
