@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class ModelConfigResponse(BaseModel):
-    """去敏后的模型配置响应。"""
+    """脱敏后的模型配置响应。"""
 
     provider: str = Field(..., description="模型供应商类型")
     base_url: str = Field(..., description="OpenAI 兼容接口地址")
@@ -31,4 +31,3 @@ class AgentRunResponse(BaseModel):
 
     answer: str = Field(default="", description="Agent 输出文本")
     structured_output: dict[str, Any] | None = Field(default=None, description="结构化输出结果")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="模型、工具、耗时等运行元数据")

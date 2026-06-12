@@ -14,11 +14,9 @@ class AgentAssembly:
     """
 
     # LangChain create_agent(...) 返回的 agent 实例。
-    # dry_run=True 时不会真实创建 agent，因此这里会是 None。
     agent: Any
 
     # 本次装配使用的模型实例。
-    # dry_run=True 时不会创建模型，因此这里会是 None。
     model: Any
 
     # 本次允许 agent 使用的工具列表。
@@ -33,8 +31,8 @@ class AgentAssembly:
     # 传给 LangChain create_agent(middleware=...) 的中间件实例列表。
     middlewares: list[Any]
 
-    # 本次运行的业务上下文，包括 sys_var、user_var、metadata 等。
+    # 本次运行的业务上下文，包括 sys_var、user_var、inputs 等。
     context: AgentRuntimeContext
 
-    # 装配过程产生的调试元数据。
+    # 装配过程产生的内部信息，不直接作为 /agent/run 的响应字段返回。
     metadata: dict[str, Any]

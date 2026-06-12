@@ -5,8 +5,7 @@ class MiddlewareFactory:
     """Agent 中间件工厂。"""
 
     def build_langchain_middlewares(self, features: AgentFeatureConfig | None = None) -> list[object]:
-        """
-        根据内部能力配置创建 LangChain AgentMiddleware 列表。
+        """根据内部能力配置创建 LangChain AgentMiddleware 列表。
 
         Args:
             features: Agent 内部装配能力开关。
@@ -17,19 +16,19 @@ class MiddlewareFactory:
         current_features = features or AgentFeatureConfig()
         middlewares: list[object] = []
 
-        # 基础能力：工具异常处理。默认开启，避免工具报错直接打断整个 Agent 流程。
+        # 基础能力：工具异常处理。默认开启，避免普通工具报错直接打断整个 Agent 流程。
         if current_features.enable_tool_error_handler:
             from app.server.agent.src.middlewares.tool_error_handler import create_tool_error_handler_middleware
 
             middlewares.append(create_tool_error_handler_middleware())
 
-        # 基础能力：工具参数注入。默认开启，只有工具声明注入参数时才会真正生效。
+        # 基础能力：工具参数注入。默认开启，只有工具声明注入参数时才真正生效。
         if current_features.enable_tool_args_injection:
             from app.server.agent.src.middlewares.tool_args_inject import create_tool_args_inject_middleware
 
             middlewares.append(create_tool_args_inject_middleware())
 
-        # 基础能力：工具调用日志。默认开启，方便后续排查 agent 为什么调用了某个工具。
+        # 基础能力：工具调用日志。默认开启，方便后续排查 Agent 为什么调用了某个工具。
         if current_features.enable_tool_logging:
             from app.server.agent.src.middlewares.tool_logging import create_tool_logging_middleware
 
@@ -44,8 +43,7 @@ class MiddlewareFactory:
         return middlewares
 
     def describe_middlewares(self, features: AgentFeatureConfig | None = None) -> list[str]:
-        """
-        返回当前内部能力配置下会启用的中间件名称。
+        """返回当前内部能力配置下会启用的中间件名称。
 
         Args:
             features: Agent 内部装配能力开关。
@@ -55,6 +53,7 @@ class MiddlewareFactory:
         """
         current_features = features or AgentFeatureConfig()
         names: list[str] = []
+
         if current_features.enable_tool_error_handler:
             names.append("ToolErrorHandlerMiddleware")
         if current_features.enable_tool_args_injection:
@@ -63,6 +62,28 @@ class MiddlewareFactory:
             names.append("ToolLoggingMiddleware")
         if current_features.enable_memory:
             names.append("MemoryPlaceholderMiddleware")
-        if current_features.enable_deferred_tool_filter:
-            names.append("DeferredToolFilterMiddleware")
+
         return names
+
+    def describe_state_schemas(self, middlewares: list[object]) -> list[str]:
+        """返回中间件声明的 LangGraph state schema 名称。
+
+        Args:
+            middlewares: 已创建的 LangChain AgentMiddleware 实例列表。
+
+        Returns:
+            去重后的 state schema 名称列表。
+        """
+        state_schema_names: list[str] = []
+
+        for middleware in middlewares:
+            # LangChain middleware 可以通过 state_schema 扩展 create_agent 底层的 LangGraph state。
+            state_schema = getattr(middleware, "state_schema", None)
+            if state_schema is None:
+                continue
+
+            state_schema_name = getattr(state_schema, "__name__", str(state_schema))
+            if state_schema_name not in state_schema_names:
+                state_schema_names.append(state_schema_name)
+
+        return state_schema_names

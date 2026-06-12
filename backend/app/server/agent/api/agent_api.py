@@ -15,8 +15,7 @@ agent_service = AgentService()
 
 @router.get("/health", response_model=Result[dict], summary="Agent 服务健康检查")
 def agent_health():
-    """
-    检查 Agent 服务是否已经挂载。
+    """检查 Agent 服务是否已经挂载。
 
     Returns:
         Agent 服务的基础运行状态。
@@ -26,8 +25,7 @@ def agent_health():
 
 @router.get("/model/config", response_model=Result[ModelConfigResponse], summary="查询当前模型配置")
 def get_current_model_config():
-    """
-    查询当前 Agent 服务使用的模型连接配置。
+    """查询当前 Agent 服务使用的模型连接配置。
 
     Returns:
         去除密钥后的模型配置，方便本地调试和排查环境变量是否生效。
@@ -51,8 +49,7 @@ def get_current_model_config():
 
 @router.get("/capabilities", response_model=Result[AgentCapabilityResponse], summary="查询 Agent 服务能力")
 def get_agent_capabilities():
-    """
-    查询 Agent 服务当前已经规划好的能力模块。
+    """查询 Agent 服务当前已经规划好的能力模块。
 
     Returns:
         Agent 服务的架构能力清单，主要用于确认骨架和边界。
@@ -83,7 +80,7 @@ def get_agent_capabilities():
                 "runtime_context_schema",
                 "memory_placeholder",
                 "postgres_checkpointer",
-                "graph_builder_placeholder",
+                "graph_state_schema",
             ],
         )
     )
@@ -91,14 +88,14 @@ def get_agent_capabilities():
 
 @router.post("/run", response_model=Result[AgentRunResponse], summary="运行通用 Agent")
 async def run_agent(request: AgentRunRequest, db: Session = Depends(get_postgres_engine)):
-    """
-    运行通用 Agent。
+    """运行通用 Agent。
 
     Args:
         request: Agent 运行请求。通过 tools 控制本次可用工具，通过 inputs 注入业务变量。
+        db: PostgreSQL Session，用于按需读写会话上下文。
 
     Returns:
-        Agent 运行结果。dry_run=true 时只返回装配信息，不真实调用模型。
+        Agent 运行结果。
     """
     result = await agent_service.run(request, db)
     return Result.success(result)

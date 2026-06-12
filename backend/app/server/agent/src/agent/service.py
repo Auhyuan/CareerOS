@@ -1,4 +1,7 @@
-import inspect
+from langchain.agents import create_agent
+from langchain_core.messages import RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from sqlmodel import Session
 
 from app.server.agent.src.agent.assembly import AgentAssembly
 from app.server.agent.src.checkpoint import AgentCheckpointService
@@ -12,24 +15,10 @@ from app.server.agent.src.schemas.config import AgentBuildConfig, AgentFeatureCo
 from app.server.agent.src.schemas.request import AgentRunRequest
 from app.server.agent.src.schemas.response import AgentRunResponse
 from app.server.agent.src.tools import AgentToolService
-from sqlmodel import Session
 
 
 class AgentService:
-    """平台通用 Agent 服务。
-
-    这个类是 agent 层的核心装配入口，职责类似 agent_engine 里的
-    LangChainAgentService.create_agent_platform(...)：
-
-    1. 根据请求构建 Agent 装配配置。
-    2. 构建运行时上下文，也就是 sys_var / user_var / metadata。
-    3. 渲染系统提示词。
-    4. 加载工具。
-    5. 加载中间件。
-    6. 创建模型。
-    7. 调用 LangChain create_agent(...) 完成真正的 agent 组装。
-    8. 运行 agent，并在结束后交给记忆服务处理交互结果。
-    """
+    """平台通用 Agent 服务，负责把模型、工具、prompt、中间件和 checkpointer 组装起来。"""
 
     def __init__(
         self,
@@ -43,17 +32,17 @@ class AgentService:
         checkpoint_service: AgentCheckpointService | None = None,
         context_service: AgentContextService | None = None,
     ):
-        """
-        初始化平台通用 Agent 服务。
+        """初始化平台通用 Agent 服务。
 
         Args:
-            model_service: 模型服务，负责 ChatOpenAI、Embedding、后续 Rerank。
-            tool_service: 工具服务，负责工具注册、工具筛选、工具注入配置。
-            prompt_service: 提示词服务，负责基础 prompt 和模块 prompt 渲染。
-            runtime_context_service: 运行上下文服务，负责构建 sys_var、user_var、metadata。
-            middleware_factory: 中间件工厂，负责按配置返回中间件列表。
-            memory_service: 记忆服务，后续区分短期上下文和长期记忆。
-            checkpoint_service: Checkpoint 服务，后续接 LangGraph 状态持久化。
+            model_service: 模型服务，负责创建 ChatOpenAI 等模型实例。
+            tool_service: 工具服务，负责按工具名筛选本次可用工具。
+            prompt_service: Prompt 服务，负责渲染系统提示词。
+            runtime_context_service: 运行时上下文服务，负责构建 thread_id、inputs 等上下文。
+            middleware_factory: 中间件工厂，负责返回本次需要装配的中间件。
+            memory_service: 记忆服务，当前先预留长期记忆能力。
+            checkpoint_service: Checkpointer 服务，负责 LangGraph 状态持久化。
+            context_service: 历史会话服务，负责读写 agent_conversations 和 agent_messages。
         """
         self.model_service = model_service or AgentModelService()
         self.tool_service = tool_service or AgentToolService()
@@ -64,20 +53,17 @@ class AgentService:
         self.checkpoint_service = checkpoint_service or AgentCheckpointService()
         self.context_service = context_service or AgentContextService()
 
-    def build_config_from_request(self, request: AgentRunRequest) -> AgentBuildConfig:
-        """
-        根据运行请求构建 Agent 装配配置。
+    def build_agent_assembly_config(self, request: AgentRunRequest) -> AgentBuildConfig:
+        """组装本次 Agent 运行需要的内部配置。
 
         Args:
             request: 通用 Agent 运行请求。
 
         Returns:
-            AgentBuildConfig 装配配置。
+            AgentBuildConfig，本次 Agent 装配配置。
         """
-        # API 层不直接暴露“中间件开关”，而是暴露 optional_features 这种业务能力参数。
-        # 这里把可选业务能力转换成 agent 内部装配配置：
-        # - 基础中间件继续默认开启，例如工具异常处理、工具参数注入、工具日志。
-        # - 可选能力按请求参数开启，例如长期记忆、延迟工具过滤、checkpoint。
+        # API 层暴露的是 optional_features 这种业务能力参数；
+        # Agent 内部真正关心的是是否装配对应中间件或运行能力。
         features = AgentFeatureConfig(
             enable_memory=request.optional_features.long_term_memory_enabled,
             enable_deferred_tool_filter=request.optional_features.deferred_tool_filter_enabled,
@@ -85,75 +71,46 @@ class AgentService:
         )
 
         return AgentBuildConfig(
-            agent_id=request.agent_id,
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
             tool_names=request.tools,
             features=features,
         )
 
-    async def assemble_agent(self, request: AgentRunRequest, context: AgentRuntimeContext) -> AgentAssembly:
-        """
-        组装 LangChain Agent。
+    async def assemble_agent(
+        self,
+        request: AgentRunRequest,
+        context: AgentRuntimeContext,
+    ) -> AgentAssembly:
+        """组装 LangChain Agent。
 
         Args:
             request: 通用 Agent 运行请求。
             context: Agent 运行上下文。
 
         Returns:
-            AgentAssembly 装配结果。
+            AgentAssembly，包含已组装的 agent、model、tools、middlewares 和调试元数据。
         """
-        # 第一步：把请求转换成“装配配置”。
-        # 运行请求里既有用户输入，也有模型参数、工具白名单、系统提示词等内容。
-        # 这里抽出真正影响 agent 结构的部分，避免后续 create_agent 时直接依赖 API 请求对象。
-        build_config = self.build_config_from_request(request)
+        # 第一步：生成本次装配配置。
+        build_config = self.build_agent_assembly_config(request)
 
         # 第二步：渲染系统提示词。
-        # prompt_service 负责把基础 prompt 和业务变量结合起来。
-        # 例如后续岗位画像编排层可以传入 {{job_direction}}、{{city}} 等变量。
         system_prompt = self.prompt_service.render_system_prompt(
             build_config.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
             context.inputs,
         )
 
-        # 第三步：根据工具白名单加载工具。
-        # 当前工具注册中心还是轻量实现，后续会加入工具参数注入配置、工具分类、
-        # 内置工具、业务工具、MCP 工具等能力。
+        # 第三步：按工具白名单加载本次可用工具。
         tools = self.tool_service.get_tools(build_config.tool_names)
 
         # 第四步：构建 LangChain runtime context schema。
-        # 这个 schema 决定中间件里能通过 request.runtime.context 访问哪些字段。
-        # 我们参考 agent_engine，预留了 sys_var、user_var、input_messages、memory_enabled 等字段。
         context_schema = self.runtime_context_service.get_context_schema()
 
-        # 第五步：根据能力开关决定中间件列表。
-        # describe_middlewares 只返回名字，用于 dry_run 和调试；
-        # 真正执行时再 build_langchain_middlewares，避免 dry_run 阶段导入 LangChain 中间件依赖。
+        # 第五步：创建中间件实例，并提取中间件声明的 LangGraph state schema。
+        middlewares = self.middleware_factory.build_langchain_middlewares(build_config.features)
         middleware_names = self.middleware_factory.describe_middlewares(build_config.features)
-
-        # dry_run 是架构调试模式。
-        # 它只返回“如果真实装配，会装配哪些内容”，不会创建模型，也不会调用 LangChain create_agent。
-        # 这样即使本地没配置 MODEL_API_KEY，也能检查 agent 层结构是否正确。
-        if request.dry_run:
-            return AgentAssembly(
-                agent=None,
-                model=None,
-                tools=tools,
-                system_prompt=system_prompt,
-                context_schema=context_schema,
-                middlewares=[],
-                context=context,
-                metadata={
-                    "dry_run": True,
-                    "tool_count": len(tools),
-                    "middlewares": middleware_names,
-                    "context_schema": context_schema.__name__,
-                    "checkpointer_enabled": False,
-                },
-            )
+        state_schema_names = self.middleware_factory.describe_state_schemas(middlewares)
 
         # 第六步：创建聊天模型。
-        # 这里统一走 AgentModelService，底层目前用 ChatOpenAI 适配 OpenAI-compatible 模型。
-        # 后续如果不同厂商有特殊参数，也应该在 model 层处理，不要泄露到 agent 组装逻辑里。
         model = self.model_service.create_chat_model(
             model=request.runtime_options.model,
             temperature=request.runtime_options.temperature,
@@ -161,42 +118,21 @@ class AgentService:
             max_retries=request.runtime_options.max_retries,
         )
 
-        # 第七步：创建 LangChain 中间件实例。
-        # 中间件会横切模型调用和工具调用，例如工具异常处理、工具日志、工具参数注入、记忆注入等。
-        middlewares = self.middleware_factory.build_langchain_middlewares(build_config.features)
-
-        # 按需获取 LangGraph checkpointer。
+        # 第七步：按需获取 LangGraph checkpointer。
         # Checkpointer 保存的是 LangGraph 图状态，不替代 ContextService 的历史消息表。
         checkpointer = None
         if build_config.features.enable_checkpointer:
             checkpointer = await self.checkpoint_service.get_checkpointer()
 
-        try:
-            from langchain.agents import create_agent
-        except ImportError as error:
-            raise RuntimeError("缺少 LangChain Agent 依赖，请先执行：pip install -r requirements.txt") from error
-
-        # 第八步：真正创建 LangChain agent。
-        # 这是整个 agent 层最核心的装配点：
-        # model 控制“用哪个模型思考”；
-        # tools 控制“能调用哪些外部能力”；
-        # system_prompt 控制“角色、目标和约束”；
-        # context_schema 控制“运行时上下文结构”；
-        # middleware 控制“模型/工具调用链路上的横切能力”。
-        create_agent_kwargs = {
-            "model": model,
-            "tools": tools,
-            "system_prompt": system_prompt,
-            "context_schema": context_schema,
-            "middleware": middlewares,
-        }
-        if checkpointer is not None:
-            create_agent_signature = inspect.signature(create_agent)
-            if "checkpointer" not in create_agent_signature.parameters:
-                raise RuntimeError("当前 LangChain create_agent 不支持 checkpointer 参数，请升级 langchain/langgraph。")
-            create_agent_kwargs["checkpointer"] = checkpointer
-
-        agent = create_agent(**create_agent_kwargs)
+        # 第八步：真正创建 LangChain Agent。
+        agent = create_agent(
+            model=model,
+            tools=tools,
+            system_prompt=system_prompt,
+            context_schema=context_schema,
+            middleware=middlewares,
+            checkpointer=checkpointer,
+        )
 
         return AgentAssembly(
             agent=agent,
@@ -207,43 +143,36 @@ class AgentService:
             middlewares=middlewares,
             context=context,
             metadata={
-                "dry_run": False,
                 "tool_count": len(tools),
+                "tools": [getattr(tool, "name", tool.__class__.__name__) for tool in tools],
                 "middlewares": middleware_names,
                 "context_schema": context_schema.__name__,
+                "state_schemas": state_schema_names,
                 "checkpointer_enabled": checkpointer is not None,
             },
         )
 
     async def run(self, request: AgentRunRequest, db: Session | None = None) -> AgentRunResponse:
-        """
-        运行通用 Agent。
+        """运行通用 Agent。
 
         Args:
             request: 通用 Agent 运行请求。
+            db: PostgreSQL Session。API 调用场景会传入，非 Web 场景可以为空。
 
         Returns:
-            通用 Agent 运行结果。
+            AgentRunResponse，包含最终回答和结构化输出。
         """
-        # 第一步：先构建运行时上下文。
-        # 注意：上下文不是 prompt，它是给 LangChain runtime 和中间件使用的数据结构。
-        # 比如工具参数注入中间件后续会从 context.sys_var / context.user_var 里拿参数。
+        # 第一步：构建运行时上下文。
         context = self.runtime_context_service.build_context(request)
 
-        # 如果本次开启短期上下文，就先保证会话存在，并把最近历史消息加载出来。
-        # 注意：这里依赖 PostgreSQL Session，所以 API 层需要把 db 传入；
-        # 如果调用方没有传 db，则跳过上下文持久化，避免 agent 服务在非 Web 场景下无法运行。
-        # dry_run 只用于检查装配结果，不应该产生会话记录或消息记录。
-        context_enabled = request.optional_features.short_term_context_enabled and db is not None and not request.dry_run
+        # 第二步：如果开启会话上下文，就从数据库读取最近历史消息。
+        context_enabled = request.optional_features.conversation_context_enabled and db is not None
         history_messages = []
         if context_enabled:
             self.context_service.ensure_conversation(
                 db,
                 conversation_id=context.thread_id,
-                metadata={
-                    "request_id": request.request_id,
-                    "source": "agent_run",
-                },
+                metadata={},
             )
             recent_messages = self.context_service.get_recent_messages(
                 db,
@@ -252,73 +181,51 @@ class AgentService:
             )
             history_messages = self.context_service.to_langchain_messages(recent_messages)
 
-        # 第二步：组装 agent。
-        # assemble_agent 只负责“把零件装起来”，不负责解释业务结果。
+        # 第三步：组装 Agent。
         assembly = await self.assemble_agent(request, context)
 
-        # dry_run 直接返回装配信息，方便我们调试平台型 agent 的结构。
-        if request.dry_run:
-            return AgentRunResponse(
-                answer="Agent 装配骨架已就绪，当前为 dry_run，未真实调用模型。",
-                metadata={
-                    **assembly.metadata,
-                    "agent_id": context.agent_id,
-                    "thread_id": context.thread_id,
-                    "allowed_tools": context.allowed_tools,
-                    "system_prompt_preview": assembly.system_prompt[:120],
-                },
-            )
-
-        # 第三步：真实运行 agent。
-        # messages 是 LangChain agent 的标准输入；
-        # config.configurable.thread_id 后续用于 checkpointer / LangGraph 状态恢复；
-        # context 是传给中间件和 runtime 使用的结构化上下文。
-        # 如果开启短期上下文，则把历史消息拼在本轮用户问题之前。
-        # 为了避免重复，本轮用户问题只在模型调用前加入 messages，调用成功后再写入数据库。
+        # 第四步：组装传给 LangChain 的消息。
+        # 如果启用了 checkpointer，同一个 thread_id 可能会恢复出旧的 state.messages。
+        # 这里参考 agent_engine 的做法，先清空 checkpoint 中的旧 messages，
+        # 再注入 ContextService 构建的历史消息和本轮用户消息，确保历史来源只有 ContextService。
         input_messages = [
+            RemoveMessage(id=REMOVE_ALL_MESSAGES),
             *history_messages,
             {"role": "user", "content": request.query},
         ]
 
+        # 第五步：运行前写入用户消息。
         if context_enabled:
             self.context_service.add_user_message(
                 db,
                 conversation_id=context.thread_id,
                 content=request.query,
-                metadata={
-                    "request_id": request.request_id,
-                    "agent_id": context.agent_id,
-                },
+                metadata={},
             )
 
+        # 第六步：真实调用 Agent。
         result = await assembly.agent.ainvoke(
             {"messages": input_messages},
             config={"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50},
             context=context.to_langchain_context(),
         )
 
-        # 第四步：提取最终回答。
-        # LangChain agent 的最终结果通常在 messages 的最后一条 AIMessage 中。
+        # 第七步：提取最终回答。
         answer = result["messages"][-1].content if result.get("messages") else ""
 
-        # 第五步：把交互交给记忆服务。
-        # 当前 MemoryService 还是占位实现，后续可以在这里异步更新长期记忆。
+        # 第八步：交给长期记忆服务处理。当前 MemoryService 还是占位实现。
         await self.memory_service.save_interaction(context, answer)
 
+        # 第九步：运行后写入 Agent 回复。
         if context_enabled:
             self.context_service.add_assistant_message(
                 db,
                 conversation_id=context.thread_id,
                 content=answer,
-                metadata={
-                    "request_id": request.request_id,
-                    "agent_id": context.agent_id,
-                    "structured_output_exists": bool(result.get("structured_response") or result.get("structured_output")),
-                },
+                metadata={},
             )
 
         return AgentRunResponse(
             answer=answer,
             structured_output=result.get("structured_response") or result.get("structured_output"),
-            metadata=assembly.metadata,
         )

@@ -9,8 +9,7 @@ class AgentRuntimeContextService:
     """Agent 运行上下文服务。"""
 
     def build_context(self, request: AgentRunRequest) -> AgentRuntimeContext:
-        """
-        根据运行请求构建 Agent 运行上下文。
+        """根据运行请求构建 Agent 运行上下文。
 
         Args:
             request: 通用 Agent 运行请求。
@@ -18,34 +17,23 @@ class AgentRuntimeContextService:
         Returns:
             AgentRuntimeContext 运行上下文对象。
         """
-        thread_id = request.conversation_id or request.request_id or uuid4().hex
-        sys_var = {
-            "request_id": request.request_id or "",
-            "thread_id": thread_id,
-        }
+        thread_id = request.conversation_id or uuid4().hex
         optional_features = request.optional_features.model_dump()
 
         return AgentRuntimeContext(
-            agent_id=request.agent_id,
             thread_id=thread_id,
             query=request.query,
-            sys_var=sys_var,
+            sys_var={"thread_id": thread_id},
             user_var=request.inputs,
             inputs=request.inputs,
             files=request.files,
-            input_messages=request.input_messages,
             allowed_tools=request.tools,
             optional_features=optional_features,
             memory_enabled=request.optional_features.long_term_memory_enabled,
-            metadata={
-                "dry_run": request.dry_run,
-                "optional_features": optional_features,
-            },
         )
 
     def get_context_schema(self):
-        """
-        获取 LangChain Agent 运行时上下文 schema。
+        """获取 LangChain Agent 运行时上下文 schema。
 
         Returns:
             可传给 create_agent(context_schema=...) 的 Pydantic 模型类。
