@@ -1,1 +1,1 @@
-# initalization CareerOs project
+# 该分支用于存放文档等项目启动前准备文件内容
