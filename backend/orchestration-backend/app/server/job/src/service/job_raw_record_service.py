@@ -8,11 +8,11 @@ from app.server.job.src.repository.job_repository import JobRepository
 
 
 class JobRawRecordService:
-    """原始岗位池查询服务，供画像生成流程选择招聘样本。"""
+    """原始岗位服务，负责查询招聘平台采集来的原始岗位样本。"""
 
     def __init__(self, repository: JobRepository | None = None):
         """
-        初始化原始岗位查询服务。
+        初始化原始岗位服务。
         Args:
             repository: 岗位库数据访问对象。
         """
