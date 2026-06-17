@@ -1,1 +1,1 @@
-# initalization CareerOs project
+# initialization CareerOs project
