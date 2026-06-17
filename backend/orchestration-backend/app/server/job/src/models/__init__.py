@@ -1,13 +1,13 @@
 from app.server.job.src.models.job_model import (
-    JobPosting,
+    JobDirection,
+    JobMarketProfile,
     JobRawRecord,
-    JobRequirementAnalysis,
     SpiderCrawlRun,
 )
 
 __all__ = [
     "SpiderCrawlRun",
     "JobRawRecord",
-    "JobPosting",
-    "JobRequirementAnalysis",
+    "JobDirection",
+    "JobMarketProfile",
 ]

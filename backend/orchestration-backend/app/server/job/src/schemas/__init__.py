@@ -1,6 +1,6 @@
 from app.server.job.src.schemas.request import (
     JobDirectionSearchRequest,
-    JobPostingSearchRequest,
+    JobRawRecordSearchRequest,
     QcwyJobCrawlAndIngestRequest,
 )
 from app.server.job.src.schemas.response import (
@@ -8,20 +8,18 @@ from app.server.job.src.schemas.response import (
     JobDirectionListResponse,
     JobDirectionResponse,
     JobMarketProfileResponse,
-    JobPostingListResponse,
-    JobPostingResponse,
+    JobRawRecordListResponse,
     JobRawRecordResponse,
 )
 
 __all__ = [
     "JobDirectionSearchRequest",
-    "JobPostingSearchRequest",
+    "JobRawRecordSearchRequest",
     "QcwyJobCrawlAndIngestRequest",
     "JobCrawlIngestResponse",
     "JobDirectionResponse",
     "JobDirectionListResponse",
     "JobMarketProfileResponse",
-    "JobPostingResponse",
-    "JobPostingListResponse",
     "JobRawRecordResponse",
+    "JobRawRecordListResponse",
 ]
