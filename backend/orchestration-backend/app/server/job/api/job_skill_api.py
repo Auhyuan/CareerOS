@@ -1,0 +1,54 @@
+from fastapi import APIRouter, Depends
+from sqlmodel import Session
+
+from app.common.db.postgres_db import get_postgres_engine
+from app.common.schemas.result import Result
+from app.server.job.src.schemas.job_skill import (
+    JobSkillCreateRequest,
+    JobSkillCreateResponse,
+    JobSkillSearchRequest,
+    JobSkillSearchResponse,
+)
+from app.server.job.src.service.job_skill_service import JobSkillService
+
+
+router = APIRouter(prefix="/skills")
+job_skill_service = JobSkillService()
+
+
+@router.post("/search", response_model=Result[JobSkillSearchResponse], summary="查询岗位技能")
+def search_job_skills(
+    request: JobSkillSearchRequest,
+    db: Session = Depends(get_postgres_engine),
+):
+    """
+    根据关键词查询平台岗位技能。
+
+    Args:
+        request: 技能查询关键字和返回数量。
+        db: PostgreSQL 数据库会话。
+
+    Returns:
+        统一响应结构，data 中包含匹配技能列表。
+    """
+    result = job_skill_service.search_skills(db, request)
+    return Result.success(result)
+
+
+@router.post("/create", response_model=Result[JobSkillCreateResponse], summary="创建岗位技能")
+def create_job_skill(
+    request: JobSkillCreateRequest,
+    db: Session = Depends(get_postgres_engine),
+):
+    """
+    创建岗位技能；标准化名称已存在时直接返回已有技能。
+
+    Args:
+        request: 技能名称和技能描述。
+        db: PostgreSQL 数据库会话。
+
+    Returns:
+        统一响应结构，data 中包含技能和是否新建的标记。
+    """
+    result = job_skill_service.create_skill(db, request)
+    return Result.success(result)

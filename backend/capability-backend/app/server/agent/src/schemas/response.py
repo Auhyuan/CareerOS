@@ -26,6 +26,7 @@ class AgentCapabilityResponse(BaseModel):
     service_name: str = Field(..., description="服务名称")
     modules: list[str] = Field(default_factory=list, description="Agent 服务内部模块")
     enabled_features: list[str] = Field(default_factory=list, description="当前已规划或可用的能力")
+    registered_tools: list[str] = Field(default_factory=list, description="当前已注册的 Agent 工具名称")
 
 
 class AgentRunResponse(BaseModel):

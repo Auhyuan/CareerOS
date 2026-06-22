@@ -159,7 +159,7 @@ POST /agent/templates/upsert
       "required": ["job_name"],
       "additionalProperties": false
     },
-    "tools": [],
+    "tools": ["search_job_skills", "create_job_skill"],
     "optional_features": {
       "conversation_context_enabled": true,
       "checkpoint_enabled": true
@@ -394,3 +394,37 @@ profile_type = system
 - `use_system_job_data=true` 时当前返回“参考系统岗位数据功能暂未开放”。
 - `profile_type=user` 但缺少 `user_id` 或 `job_text` 时返回参数校验错误。
 - `profile_type=system` 时当前返回“系统岗位画像生成功能暂未开放”。
+
+### 6.9 查询岗位技能
+
+```http
+POST /job/skills/search
+```
+
+请求示例：
+
+```json
+{
+  "keyword": "FastAPI",
+  "limit": 10
+}
+```
+
+查询优先使用标准化名称精确匹配，再按技能名称和描述进行不区分大小写的模糊匹配。
+
+### 6.10 创建岗位技能
+
+```http
+POST /job/skills/create
+```
+
+请求示例：
+
+```json
+{
+  "name": "FastAPI",
+  "description": "用于构建 Python Web API 的现代异步框架"
+}
+```
+
+如果标准化名称已经存在，接口直接返回已有技能，并将 `created` 设置为 `false`。

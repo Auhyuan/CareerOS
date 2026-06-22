@@ -46,7 +46,12 @@ def create_tool_logging_middleware() -> Any:
 
             # 这里先只写应用日志，不直接修改 state。
             # 后续如果要把工具轨迹持久化到 LangGraph state，可以返回 Command 更新 tool_trace。
-            logger.info("Agent tool call start: %s", tool_call)
+            tool_args = tool_call.get("args") or {}
+            logger.info(
+                "Agent tool call start: name=%s arg_keys=%s",
+                tool_call.get("name"),
+                sorted(tool_args.keys()) if isinstance(tool_args, dict) else [],
+            )
             response = await handler(request)
             logger.info("Agent tool call end: name=%s cost=%.3fs", tool_call.get("name"), time.time() - start_time)
             return response

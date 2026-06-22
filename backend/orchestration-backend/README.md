@@ -42,6 +42,8 @@ GET  /job/directions/{direction_id}
 ```text
 GET  /job/profiles/{profile_id}
 POST /job/profiles/generate
+POST /job/skills/search
+POST /job/skills/create
 ```
 
 用户岗位画像生成请求：

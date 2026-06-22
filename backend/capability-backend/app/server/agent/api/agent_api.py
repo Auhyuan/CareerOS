@@ -83,7 +83,9 @@ def get_agent_capabilities():
                 "memory_placeholder",
                 "postgres_checkpointer",
                 "graph_state_schema",
+                "job_skill_http_tools",
             ],
+            registered_tools=agent_service.tool_service.list_tools(),
         )
     )
 

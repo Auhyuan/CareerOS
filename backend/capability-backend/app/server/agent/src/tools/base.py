@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -8,7 +8,7 @@ class AgentToolDefinition(BaseModel):
 
     name: str = Field(..., description="工具名称")
     description: str = Field(default="", description="工具说明")
-    callable_ref: Callable[..., Any] | None = Field(default=None, description="工具函数引用")
+    callable_ref: Any | None = Field(default=None, description="LangChain Tool、工具函数或其他可执行工具对象")
 
     class Config:
         """Pydantic 模型配置。"""

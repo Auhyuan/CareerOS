@@ -15,6 +15,17 @@ app/common/            # 通用配置、数据库、响应、异常处理
 sql/                   # 能力层数据库脚本
 ```
 
+## Agent 内置工具
+
+当前内置 Job HTTP 工具：
+
+```text
+search_job_skills
+create_job_skill
+```
+
+工具通过 `ORCHESTRATION_BASE_URL` 调用业务编排层，不直接访问 Job 数据库。Agent 模板必须在 `config.tools` 中明确声明需要的工具；空数组表示不装配工具。
+
 ## 主要接口
 
 Agent：
@@ -109,6 +120,8 @@ D:\study\get_job_data\backend\capability-backend\app\server\agent\model_gateway.
 FASTAPI_HOST
 FASTAPI_PORT
 LOG_LEVEL
+ORCHESTRATION_BASE_URL
+ORCHESTRATION_TIMEOUT_SECONDS
 POSTGRES_HOST
 POSTGRES_PORT
 POSTGRES_USER
