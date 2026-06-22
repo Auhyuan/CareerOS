@@ -302,10 +302,10 @@ POST /job/directions/search
 GET /job/directions/{direction_id}
 ```
 
-### 6.7 查询岗位方向画像
+### 6.7 查询岗位画像详情
 
 ```http
-GET /job/directions/{direction_id}/profile
+GET /job/profiles/{profile_id}
 ```
 
 ### 6.8 生成岗位画像
@@ -314,11 +314,38 @@ GET /job/directions/{direction_id}/profile
 POST /job/profiles/generate
 ```
 
-当前为占位接口。后续会由编排层完成以下流程：
+当前接口用于根据用户提交的岗位文本生成临时岗位画像。
 
-1. 查询岗位方向。
-2. 从 `job_raw_records` 选择样本。
-3. 构造岗位画像分析 prompt。
-4. 调用能力层 `/agent/run`。
-5. 解析结构化输出。
-6. 写入 `job_market_profiles`。
+请求示例：
+
+```json
+{
+  "user_id": "10001",
+  "job_text": "用户粘贴的岗位名称、岗位职责和任职要求等文本",
+  "use_system_job_data": false
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | string | 是 | Java 层传入的用户 ID。 |
+| `job_text` | string | 是 | 用户提交的任意岗位相关文本，最大 50000 字符。 |
+| `use_system_job_data` | boolean | 否 | 是否参考系统岗位数据；默认 `false`，当前暂未开放。 |
+
+处理流程：
+
+1. 校验并清理 `job_text`。
+2. 调用能力层 `/agent/run`。
+3. 从 `structured_output` 或 `answer` 中提取岗位画像 JSON。
+4. 使用 Pydantic 校验结构和技能规则。
+5. 首次校验失败时请求 Agent 修复一次。
+6. 编排层补充 `user_id` 和 `profile_type=temporary`。
+7. 写入 `job_market_profiles` 并返回保存后的画像。
+
+注意：
+
+- Agent 只能依据用户提供的 `job_text` 生成画像。
+- 除 `job_name` 外，缺失文本返回 `null`，缺失列表返回 `[]`。
+- `use_system_job_data=true` 时当前返回“参考系统岗位数据功能暂未开放”。

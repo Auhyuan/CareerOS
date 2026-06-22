@@ -93,9 +93,9 @@ COMMENT ON TABLE job_market_profiles IS
 '岗位画像表：保存某个岗位方向的聚合画像，是前端页面展示的核心岗位信息。';
 
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'id', '主键 ID。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'direction_id', '关联的岗位方向 ID，对应 job_directions.id。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'job_direction', '兼容旧结构的岗位方向文本字段；新结构优先使用 direction_id。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'job_name', '岗位画像名称，通常与岗位方向名称一致。');
+SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'user_id', '用户 ID；系统画像为空，用户临时画像记录所属用户。');
+SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'profile_type', '画像类型：system=平台正式画像，temporary=用户临时画像。');
+SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'job_name', '岗位画像名称，由 Agent 根据输入的岗位信息提炼。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'job_overview', '岗位概述，由多个原始招聘岗位聚合生成。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'responsibilities', '岗位职责列表，使用 JSONB 保存结构化内容。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'required_skills', '必备技能要求列表，使用 JSONB 保存结构化内容。');
@@ -103,9 +103,5 @@ SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'preferred_skills
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'education_requirement', '学历要求总结。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'experience_requirement', '工作经验要求总结。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'certificate_requirement', '证书要求总结。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'source_job_ids', '生成该画像时引用的原始岗位 ID 列表，通常对应 job_raw_records.id。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'source_filters', '生成该画像时使用的样本筛选条件，例如城市、关键词、平台。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'model_name', '生成该画像使用的模型名称。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'analysis_version', '岗位画像生成逻辑或提示词版本。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'created_at', '记录创建时间。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'updated_at', '记录更新时间。');

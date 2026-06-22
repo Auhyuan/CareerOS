@@ -63,7 +63,8 @@ class JobMarketProfileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    direction_id: int
+    user_id: str | None = None
+    profile_type: str
     job_name: str
     job_overview: str | None = None
     responsibilities: list[Any] | None = None
@@ -72,10 +73,6 @@ class JobMarketProfileResponse(BaseModel):
     education_requirement: str | None = None
     experience_requirement: str | None = None
     certificate_requirement: str | None = None
-    source_job_ids: list[Any] | None = None
-    source_filters: dict[str, Any] | None = None
-    model_name: str | None = None
-    analysis_version: str | None = None
     created_at: datetime
     updated_at: datetime
 

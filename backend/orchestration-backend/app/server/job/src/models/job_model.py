@@ -71,7 +71,8 @@ class JobMarketProfile(SQLModel, table=True):
     __tablename__ = "job_market_profiles"
 
     id: int | None = Field(default=None, primary_key=True)
-    direction_id: int = Field(foreign_key="job_directions.id")
+    user_id: str | None = Field(default=None, max_length=100)
+    profile_type: str = Field(default="system", max_length=30)
     job_name: str = Field(max_length=255)
 
     job_overview: str | None = Field(default=None)
@@ -82,12 +83,6 @@ class JobMarketProfile(SQLModel, table=True):
     education_requirement: str | None = Field(default=None)
     experience_requirement: str | None = Field(default=None)
     certificate_requirement: str | None = Field(default=None)
-
-    source_job_ids: list[Any] | None = Field(default=None, sa_column=Column(JSONB))
-    source_filters: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
-
-    model_name: str | None = Field(default=None, max_length=100)
-    analysis_version: str | None = Field(default=None, max_length=50)
 
     created_at: datetime = Field(default_factory=now_time)
     updated_at: datetime = Field(default_factory=now_time)

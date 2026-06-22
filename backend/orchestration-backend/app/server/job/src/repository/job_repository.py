@@ -218,14 +218,27 @@ class JobRepository:
         """
         return db.get(JobDirection, direction_id)
 
-    def get_profile_by_direction_id(self, direction_id: int, db: Session) -> JobMarketProfile | None:
+    def get_profile_by_id(self, profile_id: int, db: Session) -> JobMarketProfile | None:
         """
-        根据岗位方向 ID 查询聚合岗位画像。
+        根据岗位画像 ID 查询岗位画像。
         Args:
-            direction_id: 岗位方向 ID。
+            profile_id: 岗位画像 ID。
             db: 数据库会话。
         Returns:
             岗位画像；不存在时返回 None。
         """
-        sql = select(JobMarketProfile).where(JobMarketProfile.direction_id == direction_id)
-        return db.exec(sql).first()
+        return db.get(JobMarketProfile, profile_id)
+
+    def create_profile(self, profile: JobMarketProfile, db: Session) -> JobMarketProfile:
+        """
+        保存一条岗位画像。
+        Args:
+            profile: 待保存的岗位画像。
+            db: 数据库会话。
+        Returns:
+            已保存的岗位画像。
+        """
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return profile

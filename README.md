@@ -49,7 +49,7 @@ docs/                        # 项目级设计文档
 - 采集并入库前程无忧岗位：`/job/crawl/qcwy/jobs`
 - 查询原始岗位池：`/job/raw-records/search`
 - 查询岗位方向字典：`/job/directions/search`
-- 查询岗位画像：`/job/directions/{direction_id}/profile`
+- 查询岗位画像：`/job/profiles/{profile_id}`
 - 岗位画像生成占位接口：`/job/profiles/generate`
 
 ## 调用链路

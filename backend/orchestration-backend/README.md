@@ -40,9 +40,22 @@ GET  /job/directions/{direction_id}
 岗位画像：
 
 ```text
-GET  /job/directions/{direction_id}/profile
+GET  /job/profiles/{profile_id}
 POST /job/profiles/generate
 ```
+
+临时岗位画像生成请求：
+
+```json
+{
+  "user_id": "10001",
+  "job_text": "用户提交的岗位相关文本",
+  "use_system_job_data": false
+}
+```
+
+编排层调用能力层 `/agent/run` 获取结构化画像，校验通过后以
+`profile_type=temporary` 写入 `job_market_profiles`。
 
 ## 数据库
 

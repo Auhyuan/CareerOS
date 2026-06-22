@@ -17,8 +17,6 @@
 erDiagram
     spider_crawl_runs ||--o{ job_raw_records : "产生原始岗位"
     job_directions ||--o{ job_directions : "父子方向"
-    job_directions ||--o{ job_market_profiles : "生成岗位画像"
-    job_market_profiles }o--o{ job_raw_records : "引用样本ID"
     agent_conversations ||--o{ agent_messages : "包含消息"
 
     spider_crawl_runs {
@@ -65,7 +63,8 @@ erDiagram
 
     job_market_profiles {
         bigint id PK
-        bigint direction_id FK
+        varchar user_id
+        varchar profile_type
         varchar job_name
         text job_overview
         jsonb responsibilities
@@ -74,10 +73,6 @@ erDiagram
         text education_requirement
         text experience_requirement
         text certificate_requirement
-        jsonb source_job_ids
-        jsonb source_filters
-        varchar model_name
-        varchar analysis_version
         timestamptz created_at
         timestamptz updated_at
     }
@@ -149,13 +144,14 @@ erDiagram
 
 ### 3.4 `job_market_profiles`
 
-保存某个岗位方向的聚合岗位画像，是前端页面的主展示数据。
+保存 Agent 根据平台岗位信息或用户上传岗位信息提炼出的岗位画像，是前端页面的主展示数据。
 
 设计原则：
 
-- 当前建议一个岗位方向保留一份最新画像。
-- `source_job_ids` 保存画像生成时引用的原始岗位 ID 列表。
-- 如后续需要历史版本，可以再新增画像版本表。
+- 画像表只保存前端需要展示的业务内容。
+- `profile_type` 区分系统正式画像和用户临时画像。
+- 系统画像的 `user_id` 为空，用户临时画像记录所属用户 ID。
+- 如后续需要生成溯源、模型记录或历史版本，应新增独立的画像生成任务表。
 
 ## 4. 当前保留与清理策略
 
@@ -190,8 +186,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_job_directions_code
 ON job_directions(code)
 WHERE code IS NOT NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_job_market_profiles_direction_id
-ON job_market_profiles(direction_id);
+CREATE INDEX IF NOT EXISTS idx_job_market_profiles_profile_type
+ON job_market_profiles(profile_type);
+
+CREATE INDEX IF NOT EXISTS idx_job_market_profiles_user_id
+ON job_market_profiles(user_id);
 
 CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation_created
 ON agent.agent_messages(conversation_id, created_at);
