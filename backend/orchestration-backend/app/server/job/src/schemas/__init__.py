@@ -1,9 +1,9 @@
 from app.server.job.src.schemas.job_profile import (
     GeneratedJobProfile,
+    JobProfileGenerateRequest,
     JobResponsibility,
     PreferredSkill,
     RequiredSkill,
-    TemporaryJobProfileGenerateRequest,
 )
 from app.server.job.src.schemas.request import (
     JobDirectionSearchRequest,
@@ -20,7 +20,7 @@ from app.server.job.src.schemas.response import (
 )
 
 __all__ = [
-    "TemporaryJobProfileGenerateRequest",
+    "JobProfileGenerateRequest",
     "JobResponsibility",
     "RequiredSkill",
     "PreferredSkill",

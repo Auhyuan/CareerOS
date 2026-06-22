@@ -4,7 +4,7 @@ from sqlmodel import Session
 from app.common.core.exceptions import BusinessException
 from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
-from app.server.job.src.schemas.job_profile import TemporaryJobProfileGenerateRequest
+from app.server.job.src.schemas.job_profile import JobProfileGenerateRequest
 from app.server.job.src.schemas.response import JobMarketProfileResponse
 from app.server.job.src.service import JobProfileService
 
@@ -13,20 +13,20 @@ router = APIRouter(prefix="/profiles")
 job_profile_service = JobProfileService()
 
 
-@router.post("/generate", response_model=Result[JobMarketProfileResponse], summary="生成用户临时岗位画像")
-def generate_temporary_job_profile(
-    request: TemporaryJobProfileGenerateRequest,
+@router.post("/generate", response_model=Result[JobMarketProfileResponse], summary="生成岗位画像")
+def generate_job_profile(
+    request: JobProfileGenerateRequest,
     db: Session = Depends(get_postgres_engine),
 ):
     """
-    根据用户提交的岗位文本生成并保存临时岗位画像。
+    根据画像类型生成并保存岗位画像。
     Args:
-        request: 用户 ID、岗位文本和系统岗位数据参考开关。
+        request: 岗位画像类型及对应生成路线参数。
         db: 数据库会话。
     Returns:
-        已保存的临时岗位画像。
+        已保存的岗位画像。
     """
-    profile = job_profile_service.generate_temporary_profile(db, request)
+    profile = job_profile_service.generate_profile(db, request)
     return Result.success(profile)
 
 

@@ -44,18 +44,24 @@ GET  /job/profiles/{profile_id}
 POST /job/profiles/generate
 ```
 
-临时岗位画像生成请求：
+用户岗位画像生成请求：
 
 ```json
 {
+  "profile_type": "user",
   "user_id": "10001",
   "job_text": "用户提交的岗位相关文本",
   "use_system_job_data": false
 }
 ```
 
-编排层调用能力层 `/agent/run` 获取结构化画像，校验通过后以
-`profile_type=temporary` 写入 `job_market_profiles`。
+`/job/profiles/generate` 是统一生成入口：
+
+- `profile_type=user`：执行用户岗位画像生成流程。
+- `profile_type=system`：系统画像路线预留，当前暂未开放。
+
+用户画像流程会调用能力层 `/agent/run` 获取结构化画像，校验通过后写入
+`job_market_profiles`。
 
 ## 数据库
 

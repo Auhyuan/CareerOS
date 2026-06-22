@@ -3,30 +3,35 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class TemporaryJobProfileGenerateRequest(BaseModel):
-    """用户临时岗位画像生成请求。"""
+class JobProfileGenerateRequest(BaseModel):
+    """岗位画像统一生成请求，根据画像类型进入不同生成路线。"""
 
-    user_id: str = Field(min_length=1, max_length=100, description="Java 层传入的用户 ID")
-    job_text: str = Field(min_length=1, max_length=50000, description="用户提交的岗位相关文本")
+    profile_type: Literal["user", "system"] = Field(description="画像类型：user 或 system")
+
+    # user 路线参数在统一请求中保持可选，进入 user 路线后再执行组合校验。
+    user_id: str | None = Field(default=None, max_length=100, description="用户 ID；user 路线必填")
+    job_text: str | None = Field(default=None, max_length=50000, description="岗位相关文本；user 路线必填")
     use_system_job_data: bool = Field(
         default=False,
-        description="是否参考系统岗位数据；第一版暂未启用",
+        description="user 路线是否参考系统岗位数据；当前暂未启用",
     )
+
+    # system 路线参数将在系统画像生成方案确定后继续补充。
 
     @field_validator("user_id", "job_text")
     @classmethod
-    def strip_required_text(cls, value: str) -> str:
+    def strip_optional_text(cls, value: str | None) -> str | None:
         """
-        清理必填文本首尾空白，并禁止纯空白内容。
+        清理可选文本首尾空白，纯空白内容转换为 None。
         Args:
             value: 请求中的文本字段值。
         Returns:
-            清理后的文本。
+            清理后的文本或 None。
         """
+        if value is None:
+            return None
         cleaned_value = value.strip()
-        if not cleaned_value:
-            raise ValueError("字段不能为空")
-        return cleaned_value
+        return cleaned_value or None
 
 
 class JobResponsibility(BaseModel):

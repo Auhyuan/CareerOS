@@ -93,8 +93,8 @@ COMMENT ON TABLE job_market_profiles IS
 '岗位画像表：保存某个岗位方向的聚合画像，是前端页面展示的核心岗位信息。';
 
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'id', '主键 ID。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'user_id', '用户 ID；系统画像为空，用户临时画像记录所属用户。');
-SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'profile_type', '画像类型：system=平台正式画像，temporary=用户临时画像。');
+SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'user_id', '用户 ID；系统画像为空，用户生成画像记录所属用户。');
+SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'profile_type', '画像类型：system=平台系统画像，user=用户生成画像。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'job_name', '岗位画像名称，由 Agent 根据输入的岗位信息提炼。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'job_overview', '岗位概述，由多个原始招聘岗位聚合生成。');
 SELECT pg_temp.comment_column_if_exists('job_market_profiles', 'responsibilities', '岗位职责列表，使用 JSONB 保存结构化内容。');

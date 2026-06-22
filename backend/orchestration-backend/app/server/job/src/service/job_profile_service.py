@@ -11,7 +11,7 @@ from app.server.job.src.models.job_model import JobMarketProfile
 from app.server.job.src.repository.job_repository import JobRepository
 from app.server.job.src.schemas.job_profile import (
     GeneratedJobProfile,
-    TemporaryJobProfileGenerateRequest,
+    JobProfileGenerateRequest,
 )
 
 
@@ -64,7 +64,7 @@ JSON 结构必须严格如下：
 
 
 class JobProfileService:
-    """岗位画像服务，负责临时画像生成、校验、保存和详情查询。"""
+    """岗位画像服务，负责生成路线分发、结果校验、保存和详情查询。"""
 
     def __init__(
         self,
@@ -80,24 +80,47 @@ class JobProfileService:
         self.repository = repository or JobRepository()
         self.capability_agent_client = capability_agent_client or CapabilityAgentClient()
 
-    def generate_temporary_profile(
+    def generate_profile(
         self,
         db: Session,
-        request: TemporaryJobProfileGenerateRequest,
+        request: JobProfileGenerateRequest,
     ) -> JobMarketProfile:
         """
-        根据用户提交的岗位文本生成并保存临时岗位画像。
+        根据画像类型分发到对应的岗位画像生成路线。
         Args:
             db: 数据库会话。
-            request: 用户临时岗位画像生成请求。
+            request: 岗位画像统一生成请求。
         Returns:
-            已保存的临时岗位画像。
+            已保存的岗位画像。
         Raises:
-            BusinessException: 功能未开放、Agent 调用失败或输出校验失败。
+            BusinessException: 对应画像生成路线未开放或生成失败。
         """
+        if request.profile_type == "user":
+            return self._generate_user_profile(db, request)
+
+        return self._generate_system_profile(db, request)
+
+    def _generate_user_profile(
+        self,
+        db: Session,
+        request: JobProfileGenerateRequest,
+    ) -> JobMarketProfile:
+        """
+        根据用户提交的岗位文本生成并保存用户岗位画像。
+        Args:
+            db: 数据库会话。
+            request: 岗位画像统一生成请求。
+        Returns:
+            已保存的用户岗位画像。
+        """
+        self._validate_user_route_request(request)
+
         if request.use_system_job_data:
             raise BusinessException(code=400, msg="参考系统岗位数据功能暂未开放")
 
+        # user 路线校验完成后，这两个字段必然存在；断言仅用于收窄静态类型。
+        assert request.user_id is not None
+        assert request.job_text is not None
         cleaned_job_text = self._clean_job_text(request.job_text)
         agent_result = self._call_profile_agent(cleaned_job_text)
 
@@ -121,7 +144,7 @@ class JobProfileService:
 
         profile = JobMarketProfile(
             user_id=request.user_id,
-            profile_type="temporary",
+            profile_type=request.profile_type,
             job_name=generated_profile.job_name,
             job_overview=generated_profile.job_overview,
             responsibilities=[item.model_dump() for item in generated_profile.responsibilities],
@@ -132,6 +155,45 @@ class JobProfileService:
             certificate_requirement=generated_profile.certificate_requirement,
         )
         return self.repository.create_profile(profile, db)
+
+    def _generate_system_profile(
+        self,
+        db: Session,
+        request: JobProfileGenerateRequest,
+    ) -> JobMarketProfile:
+        """
+        处理系统岗位画像生成路线。
+        Args:
+            db: 数据库会话；系统路线实现后用于读取岗位数据和保存画像。
+            request: 岗位画像统一生成请求。
+        Returns:
+            已保存的系统岗位画像。
+        Raises:
+            BusinessException: 系统岗位画像生成路线当前尚未开放。
+        """
+        # 显式保留独立路线入口，后续可在此增加 system 专属参数校验和生成编排。
+        raise BusinessException(code=400, msg="系统岗位画像生成功能暂未开放")
+
+    def _validate_user_route_request(self, request: JobProfileGenerateRequest) -> None:
+        """
+        校验用户岗位画像生成路线需要的参数组合。
+        Args:
+            request: 岗位画像统一生成请求。
+        Raises:
+            BusinessException: user 路线缺少用户 ID 或岗位文本。
+        """
+        missing_fields: list[str] = []
+        if not request.user_id:
+            missing_fields.append("user_id")
+        if not request.job_text:
+            missing_fields.append("job_text")
+
+        if missing_fields:
+            field_names = "、".join(missing_fields)
+            raise BusinessException(
+                code=422,
+                msg=f"profile_type=user 时以下参数不能为空：{field_names}",
+            )
 
     def get_profile_detail(self, db: Session, profile_id: int) -> JobMarketProfile | None:
         """
