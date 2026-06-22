@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ModelRuntimeOptions(BaseModel):
@@ -31,8 +31,26 @@ class AgentRunRequest(BaseModel):
     query: str = Field(..., min_length=1, description="用户输入或编排层传入的任务指令")
     conversation_id: str | None = Field(default=None, description="会话 ID 或任务线程 ID")
     system_prompt: str | None = Field(default=None, description="本次运行使用的系统提示词")
+    response_format: dict[str, Any] | None = Field(
+        default=None,
+        description="结构化输出 JSON Schema；为空时不启用结构化输出",
+    )
     inputs: dict[str, Any] = Field(default_factory=dict, description="编排层注入的业务变量")
     files: list[dict[str, Any]] = Field(default_factory=list, description="附件上下文")
     tools: list[str] = Field(default_factory=list, description="本次运行允许使用的工具名称")
     optional_features: AgentOptionalFeatures = Field(default_factory=AgentOptionalFeatures, description="本次运行可选择开启的增强能力")
     runtime_options: ModelRuntimeOptions = Field(default_factory=ModelRuntimeOptions, description="模型运行参数")
+
+    @field_validator("response_format")
+    @classmethod
+    def normalize_response_format(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        """
+        规范化结构化输出配置，空对象与 null 都表示不启用结构化输出。
+
+        Args:
+            value: 调用方传入的 JSON Schema。
+
+        Returns:
+            非空 JSON Schema；未配置或传入空对象时返回 None。
+        """
+        return value or None

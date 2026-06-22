@@ -72,6 +72,7 @@ class AgentService:
 
         return AgentBuildConfig(
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
+            response_format=request.response_format,
             tool_names=request.tools,
             features=features,
         )
@@ -129,6 +130,7 @@ class AgentService:
             model=model,
             tools=tools,
             system_prompt=system_prompt,
+            response_format=build_config.response_format,
             context_schema=context_schema,
             middleware=middlewares,
             checkpointer=checkpointer,
@@ -149,6 +151,7 @@ class AgentService:
                 "context_schema": context_schema.__name__,
                 "state_schemas": state_schema_names,
                 "checkpointer_enabled": checkpointer is not None,
+                "structured_output_enabled": build_config.response_format is not None,
             },
         )
 

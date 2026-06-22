@@ -24,6 +24,7 @@
   "query": "用户问题或任务指令",
   "conversation_id": "可选会话ID",
   "system_prompt": "可选系统提示词",
+  "response_format": null,
   "inputs": {},
   "files": [],
   "tools": [],
@@ -47,6 +48,7 @@
 - `query` 是本轮用户问题或任务指令。
 - `conversation_id` 用于会话上下文和 LangGraph thread_id。
 - `system_prompt` 控制本次 Agent 的系统提示词。
+- `response_format` 接收可选 JSON Schema，非空时启用 LangChain 结构化输出。
 - `inputs` 是业务变量，供 prompt、工具、中间件读取。
 - `files` 是附件上下文。
 - `tools` 是本次允许加载的工具白名单。

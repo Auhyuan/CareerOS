@@ -354,7 +354,7 @@ Templates 层负责 Agent 模板管理。
 - 默认 optional features
 - 业务自定义配置
 
-当前模板配置使用 JSON 存储，避免过早固定字段。
+模板配置使用 JSONB 存储，并通过 `AgentTemplateConfig` 校验 `system_prompt`、`response_format`、`tools`、`optional_features` 和 `runtime_options`；同时允许额外字段，便于后续扩展。
 
 模板服务只负责配置管理。调用方如果要基于模板运行，应先通过模板接口查询配置，再把配置展开后调用 `/agent/run`。
 
@@ -380,6 +380,7 @@ Schemas 层定义请求、响应和内部配置对象。
 其中：
 
 - `AgentRunRequest` 是 `/agent/run` 请求体
+- `response_format` 是可选结构化输出 JSON Schema
 - `AgentOptionalFeatures` 是本次运行的可选能力
 - `ModelRuntimeOptions` 是模型运行参数
 - `AgentBuildConfig` 是 Agent 内部装配配置
@@ -404,7 +405,7 @@ agent_api.py
       -> RuntimeContextService.get_context_schema()
       -> MiddlewareFactory.build_langchain_middlewares()
       -> CheckpointService.get_checkpointer()
-      -> create_agent(...)
+      -> create_agent(response_format=...)
     -> agent.ainvoke(...)
     -> ContextService.add_user_message()
     -> ContextService.add_assistant_message()

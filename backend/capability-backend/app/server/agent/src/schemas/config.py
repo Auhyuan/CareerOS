@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -24,5 +26,9 @@ class AgentBuildConfig(BaseModel):
     """
 
     system_prompt: str | None = Field(default=None, description="系统提示词")
+    response_format: dict[str, Any] | None = Field(
+        default=None,
+        description="传给 LangChain create_agent 的结构化输出 JSON Schema",
+    )
     tool_names: list[str] = Field(default_factory=list, description="允许加载的工具名称")
     features: AgentFeatureConfig = Field(default_factory=AgentFeatureConfig, description="Agent 内部装配能力开关")

@@ -56,6 +56,7 @@ POST /agent/run
   "query": "请总结这些岗位的技能要求",
   "conversation_id": "career-profile-ai-app-dev",
   "system_prompt": "你是就业指导平台的岗位分析专家。",
+  "response_format": null,
   "inputs": {},
   "files": [],
   "tools": [],
@@ -81,6 +82,7 @@ POST /agent/run
 | `query` | string | 是 | 当前用户问题或任务指令。 |
 | `conversation_id` | string | 否 | 会话 ID；不传时服务端生成。 |
 | `system_prompt` | string | 否 | 本次运行使用的系统提示词。 |
+| `response_format` | object | 否 | 结构化输出 JSON Schema；不传、传 `null` 或 `{}` 时不启用。 |
 | `inputs` | object | 否 | 编排层注入的业务变量。 |
 | `files` | array | 否 | 文件输入，当前预留。 |
 | `tools` | array | 否 | 本次允许使用的工具名。 |
@@ -93,6 +95,7 @@ POST /agent/run
 - `/agent/run` 不接收外部 `input_messages`。
 - 历史会话通过 `conversation_id` 从 ContextService 获取。
 - Checkpoint 用于 LangGraph 状态持久化，不作为跨轮历史来源。
+- `response_format` 非空时，结构化结果通过 `data.structured_output` 返回。
 
 ## 3. Agent 会话接口
 
@@ -146,10 +149,24 @@ POST /agent/templates/upsert
   "description": "用于根据招聘数据生成岗位画像",
   "config": {
     "system_prompt": "你是就业指导平台的岗位分析专家。",
+    "response_format": {
+      "type": "object",
+      "properties": {
+        "job_name": {"type": "string"}
+      },
+      "required": ["job_name"],
+      "additionalProperties": false
+    },
     "tools": [],
     "optional_features": {
       "conversation_context_enabled": true,
       "checkpoint_enabled": true
+    },
+    "runtime_options": {
+      "model": null,
+      "temperature": 0.1,
+      "timeout_seconds": 60,
+      "max_retries": 2
     }
   },
   "status": "active"
@@ -159,7 +176,15 @@ POST /agent/templates/upsert
 ### 4.2 查询模板详情
 
 ```http
-GET /agent/templates/{agent_id}
+POST /agent/templates/detail
+```
+
+请求示例：
+
+```json
+{
+  "agent_id": "job-profile-agent"
+}
 ```
 
 ### 4.3 查询模板列表

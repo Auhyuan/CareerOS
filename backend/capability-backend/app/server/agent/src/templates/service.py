@@ -38,7 +38,7 @@ class AgentTemplateService:
             agent_id=request.agent_id,
             agent_name=request.agent_name,
             description=request.description,
-            config=request.config,
+            config=request.config.model_dump(mode="json"),
             status=request.status,
         )
         return self.to_view(template)

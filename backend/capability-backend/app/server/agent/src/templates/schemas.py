@@ -1,6 +1,44 @@
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.server.agent.src.schemas.request import AgentOptionalFeatures, ModelRuntimeOptions
+
+
+class AgentTemplateConfig(BaseModel):
+    """Agent 模板运行配置，对应通用 Agent 的可复用装配参数。"""
+
+    # 模板配置保存在 JSONB 中，允许额外字段可避免后续扩展 Agent 参数时立即修改表结构。
+    model_config = ConfigDict(extra="allow")
+
+    system_prompt: str | None = Field(default=None, description="Agent 默认系统提示词")
+    response_format: dict[str, Any] | None = Field(
+        default=None,
+        description="结构化输出 JSON Schema；为空时不启用结构化输出",
+    )
+    tools: list[str] = Field(default_factory=list, description="Agent 默认可用工具名称")
+    optional_features: AgentOptionalFeatures = Field(
+        default_factory=AgentOptionalFeatures,
+        description="Agent 默认可选能力配置",
+    )
+    runtime_options: ModelRuntimeOptions = Field(
+        default_factory=ModelRuntimeOptions,
+        description="Agent 默认模型运行参数",
+    )
+
+    @field_validator("response_format")
+    @classmethod
+    def normalize_response_format(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        """
+        规范化模板中的结构化输出配置。
+
+        Args:
+            value: 模板保存的 JSON Schema。
+
+        Returns:
+            非空 JSON Schema；未配置或传入空对象时返回 None。
+        """
+        return value or None
 
 
 class AgentTemplateUpsertRequest(BaseModel):
@@ -9,7 +47,7 @@ class AgentTemplateUpsertRequest(BaseModel):
     agent_id: str = Field(..., min_length=1, max_length=100, description="Agent 稳定业务 ID")
     agent_name: str = Field(..., min_length=1, max_length=255, description="Agent 展示名称")
     description: str | None = Field(default=None, description="Agent 模板描述")
-    config: dict[str, Any] = Field(default_factory=dict, description="Agent 模板配置，使用 JSONB 灵活存储")
+    config: AgentTemplateConfig = Field(default_factory=AgentTemplateConfig, description="Agent 模板配置")
     status: str = Field(default="active", max_length=30, description="模板状态，例如 active、disabled")
 
 
@@ -34,7 +72,7 @@ class AgentTemplateView(BaseModel):
     agent_id: str = Field(..., description="Agent 稳定业务 ID")
     agent_name: str = Field(..., description="Agent 展示名称")
     description: str | None = Field(default=None, description="Agent 模板描述")
-    config: dict[str, Any] = Field(default_factory=dict, description="Agent 模板配置")
+    config: AgentTemplateConfig = Field(default_factory=AgentTemplateConfig, description="Agent 模板配置")
     status: str = Field(default="active", description="模板状态")
     created_at: str | None = Field(default=None, description="创建时间")
     updated_at: str | None = Field(default=None, description="更新时间")
