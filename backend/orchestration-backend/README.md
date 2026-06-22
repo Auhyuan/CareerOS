@@ -49,6 +49,7 @@ POST /job/profiles/generate
 ```json
 {
   "profile_type": "user",
+  "agent_id": "job-profile-agent",
   "user_id": "10001",
   "job_text": "用户提交的岗位相关文本",
   "use_system_job_data": false

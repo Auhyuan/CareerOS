@@ -7,6 +7,11 @@ class JobProfileGenerateRequest(BaseModel):
     """岗位画像统一生成请求，根据画像类型进入不同生成路线。"""
 
     profile_type: Literal["user", "system"] = Field(description="画像类型：user 或 system")
+    agent_id: str = Field(
+        min_length=1,
+        max_length=100,
+        description="本次岗位画像生成使用的 Agent 模板 ID",
+    )
 
     # user 路线参数在统一请求中保持可选，进入 user 路线后再执行组合校验。
     user_id: str | None = Field(default=None, max_length=100, description="用户 ID；user 路线必填")
@@ -17,6 +22,23 @@ class JobProfileGenerateRequest(BaseModel):
     )
 
     # system 路线参数将在系统画像生成方案确定后继续补充。
+
+    @field_validator("agent_id")
+    @classmethod
+    def strip_agent_id(cls, value: str) -> str:
+        """
+        清理 Agent 模板 ID，并禁止传入纯空白内容。
+
+        Args:
+            value: 调用方指定的 Agent 模板 ID。
+
+        Returns:
+            清理后的 Agent 模板 ID。
+        """
+        cleaned_value = value.strip()
+        if not cleaned_value:
+            raise ValueError("agent_id 不能为空")
+        return cleaned_value
 
     @field_validator("user_id", "job_text")
     @classmethod

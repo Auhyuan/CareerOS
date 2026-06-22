@@ -15,54 +15,6 @@ from app.server.job.src.schemas.job_profile import (
 )
 
 
-JOB_PROFILE_SYSTEM_PROMPT = """
-你是岗位画像提炼 Agent。你的任务是只根据用户提供的岗位材料，生成结构化岗位画像。
-
-必须遵守以下规则：
-1. 只能使用用户提供的材料，不得使用外部知识补充或推测。
-2. job_name 必须生成。没有明确岗位名称时，根据职责、技能和工作内容提炼最贴切的名称；
-   完全无法判断时返回“未明确岗位”。
-3. 输入中没有明确依据的文本字段返回 null，列表字段返回 []。
-4. 不得推测学历、经验、证书、技能等级、岗位职责或工具框架。
-5. 删除公司介绍、福利待遇、公司资质、联系方式等与岗位画像无关的内容。
-6. 必备技能和加分技能不得重复。
-7. 只输出一个合法 JSON 对象，不要输出 Markdown、代码围栏、解释或其他文字。
-
-JSON 结构必须严格如下：
-{
-  "job_name": "字符串，必填",
-  "job_overview": "字符串或 null",
-  "responsibilities": [
-    {
-      "name": "字符串或 null",
-      "description": "字符串或 null"
-    }
-  ],
-  "required_skills": [
-    {
-      "name": "字符串，必填",
-      "category": "字符串或 null",
-      "level": "了解、熟悉、熟练掌握、能够独立应用之一，或 null",
-      "requirement": "字符串或 null",
-      "knowledge_points": ["字符串"],
-      "tools": ["字符串"]
-    }
-  ],
-  "preferred_skills": [
-    {
-      "name": "字符串，必填",
-      "category": "字符串或 null",
-      "requirement": "字符串或 null",
-      "tools": ["字符串"]
-    }
-  ],
-  "education_requirement": "字符串或 null",
-  "experience_requirement": "字符串或 null",
-  "certificate_requirement": "字符串或 null"
-}
-""".strip()
-
-
 class JobProfileService:
     """岗位画像服务，负责生成路线分发、结果校验、保存和详情查询。"""
 
@@ -122,7 +74,10 @@ class JobProfileService:
         assert request.user_id is not None
         assert request.job_text is not None
         cleaned_job_text = self._clean_job_text(request.job_text)
-        agent_result = self._call_profile_agent(cleaned_job_text)
+
+        # 同一次生成只读取一次模板，首次生成和修复阶段复用同一份 Agent 配置。
+        template_config = self._load_profile_agent_config(request.agent_id)
+        agent_result = self._call_profile_agent(cleaned_job_text, template_config)
 
         try:
             generated_profile = self._validate_generated_profile(agent_result)
@@ -133,6 +88,7 @@ class JobProfileService:
                 cleaned_job_text=cleaned_job_text,
                 agent_result=agent_result,
                 validation_error=str(first_error),
+                template_config=template_config,
             )
             try:
                 generated_profile = self._validate_generated_profile(repaired_result)
@@ -221,36 +177,62 @@ class JobProfileService:
             raise BusinessException(code=422, msg="job_text 不能为空")
         return normalized_text
 
-    def _call_profile_agent(self, cleaned_job_text: str) -> dict[str, Any]:
+    def _load_profile_agent_config(self, agent_id: str) -> dict[str, Any]:
         """
-        调用能力层 Agent 生成岗位画像。
+        从能力层加载调用方指定的岗位画像 Agent 模板配置。
+
+        Args:
+            agent_id: 本次岗位画像生成使用的 Agent 模板 ID。
+
+        Returns:
+            已通过基础校验的 Agent 模板 config。
+
+        Raises:
+            BusinessException: 模板查询失败、模板不存在、被禁用或配置不完整。
+        """
+        try:
+            template = self.capability_agent_client.get_agent_template(agent_id)
+        except RuntimeError as error:
+            raise BusinessException(code=502, msg=str(error)) from error
+
+        if template is None:
+            raise BusinessException(
+                code=503,
+                msg=f"岗位画像生成 Agent 模板不存在: {agent_id}",
+            )
+        if template.get("status") != "active":
+            raise BusinessException(
+                code=503,
+                msg=f"岗位画像生成 Agent 模板未启用: {agent_id}",
+            )
+
+        config = template.get("config")
+        if not isinstance(config, dict):
+            raise BusinessException(code=503, msg="岗位画像生成 Agent 模板配置无效")
+        if not isinstance(config.get("system_prompt"), str) or not config["system_prompt"].strip():
+            raise BusinessException(code=503, msg="岗位画像生成 Agent 模板缺少 system_prompt")
+        if not isinstance(config.get("response_format"), dict) or not config["response_format"]:
+            raise BusinessException(code=503, msg="岗位画像生成 Agent 模板缺少 response_format")
+        return config
+
+    def _call_profile_agent(
+        self,
+        cleaned_job_text: str,
+        template_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        使用岗位画像 Agent 模板调用能力层通用 Agent。
+
         Args:
             cleaned_job_text: 清理后的岗位文本。
+            template_config: 从能力层模板服务读取的 Agent 配置。
+
         Returns:
             能力层 Agent 运行结果。
         """
-        payload = {
-            "query": f"请根据以下岗位材料生成岗位画像：\n\n{cleaned_job_text}",
-            "system_prompt": JOB_PROFILE_SYSTEM_PROMPT,
-            "inputs": {},
-            "files": [],
-            "tools": [],
-            "optional_features": {
-                "long_term_memory_enabled": False,
-                "conversation_context_enabled": False,
-                "checkpoint_enabled": True,
-                "deferred_tool_filter_enabled": False,
-            },
-            "runtime_options": {
-                "temperature": 0.1,
-                "timeout_seconds": 60,
-                "max_retries": 2,
-            },
-        }
-        try:
-            return self.capability_agent_client.run_agent(payload)
-        except RuntimeError as error:
-            raise BusinessException(code=502, msg=str(error)) from error
+        query = f"请根据以下岗位材料生成岗位画像：\n\n{cleaned_job_text}"
+        payload = self._build_agent_run_payload(query, template_config)
+        return self._run_profile_agent(payload)
 
     def _repair_agent_output(
         self,
@@ -258,41 +240,82 @@ class JobProfileService:
         cleaned_job_text: str,
         agent_result: dict[str, Any],
         validation_error: str,
+        template_config: dict[str, Any],
     ) -> dict[str, Any]:
         """
-        请求 Agent 根据校验错误修复一次岗位画像输出。
+        使用同一 Agent 模板请求模型修复一次岗位画像输出。
+
         Args:
             cleaned_job_text: 原始岗位材料。
             agent_result: 第一次 Agent 运行结果。
             validation_error: 第一次输出的校验错误。
+            template_config: 首次生成时加载的 Agent 模板配置。
+
         Returns:
             修复后的 Agent 运行结果。
         """
         original_output = agent_result.get("structured_output") or agent_result.get("answer") or ""
-        payload = {
-            "query": (
-                "请修复下面的岗位画像输出，使其严格符合系统提示词中的 JSON 结构。"
-                "只能根据原始岗位材料修复，不得补充新事实。\n\n"
-                f"原始岗位材料：\n{cleaned_job_text}\n\n"
-                f"待修复输出：\n{original_output}\n\n"
-                f"校验错误：\n{validation_error}"
-            ),
-            "system_prompt": JOB_PROFILE_SYSTEM_PROMPT,
+        query = (
+            "请修复下面的岗位画像输出，使其严格符合 response_format 定义的结构。"
+            "只能根据原始岗位材料修复，不得补充新事实。\n\n"
+            f"原始岗位材料：\n{cleaned_job_text}\n\n"
+            f"待修复输出：\n{original_output}\n\n"
+            f"校验错误：\n{validation_error}"
+        )
+        payload = self._build_agent_run_payload(
+            query,
+            template_config,
+            runtime_overrides={"temperature": 0, "max_retries": 1},
+        )
+        return self._run_profile_agent(payload)
+
+    def _build_agent_run_payload(
+        self,
+        query: str,
+        template_config: dict[str, Any],
+        *,
+        runtime_overrides: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        将 Agent 模板配置展开为 /agent/run 请求参数。
+
+        Args:
+            query: 本次岗位画像任务指令。
+            template_config: Agent 模板 config。
+            runtime_overrides: 本次调用需要覆盖的模型运行参数。
+
+        Returns:
+            可直接提交给能力层 /agent/run 的请求体。
+        """
+        runtime_options = dict(template_config.get("runtime_options") or {})
+        if runtime_overrides:
+            runtime_options.update(runtime_overrides)
+
+        # query 是每次业务调用产生的动态内容，其余装配参数全部来源于 Agent 模板。
+        return {
+            "query": query,
+            "system_prompt": template_config["system_prompt"],
+            "response_format": template_config["response_format"],
             "inputs": {},
             "files": [],
-            "tools": [],
-            "optional_features": {
-                "long_term_memory_enabled": False,
-                "conversation_context_enabled": False,
-                "checkpoint_enabled": True,
-                "deferred_tool_filter_enabled": False,
-            },
-            "runtime_options": {
-                "temperature": 0,
-                "timeout_seconds": 60,
-                "max_retries": 1,
-            },
+            "tools": list(template_config.get("tools") or []),
+            "optional_features": dict(template_config.get("optional_features") or {}),
+            "runtime_options": runtime_options,
         }
+
+    def _run_profile_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        执行岗位画像 Agent 请求并转换能力层调用异常。
+
+        Args:
+            payload: 已完成模板展开的 /agent/run 请求体。
+
+        Returns:
+            能力层 Agent 运行结果。
+
+        Raises:
+            BusinessException: 能力层 Agent 调用失败。
+        """
         try:
             return self.capability_agent_client.run_agent(payload)
         except RuntimeError as error:

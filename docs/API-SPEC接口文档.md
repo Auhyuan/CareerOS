@@ -346,6 +346,7 @@ POST /job/profiles/generate
 ```json
 {
   "profile_type": "user",
+  "agent_id": "job-profile-agent",
   "user_id": "10001",
   "job_text": "用户粘贴的岗位名称、岗位职责和任职要求等文本",
   "use_system_job_data": false
@@ -357,6 +358,7 @@ POST /job/profiles/generate
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `profile_type` | string | 是 | 画像类型：`user` 或 `system`。 |
+| `agent_id` | string | 是 | 本次生成使用的 Agent 模板 ID。 |
 | `user_id` | string | 条件必填 | `profile_type=user` 时必填。 |
 | `job_text` | string | 条件必填 | `profile_type=user` 时必填，最大 50000 字符。 |
 | `use_system_job_data` | boolean | 否 | user 路线是否参考系统岗位数据；默认 `false`，当前暂未开放。 |
@@ -373,13 +375,15 @@ profile_type = system
 
 用户画像处理流程：
 
-1. 校验并清理 `job_text`。
-2. 调用能力层 `/agent/run`。
-3. 从 `structured_output` 或 `answer` 中提取岗位画像 JSON。
-4. 使用 Pydantic 校验结构和技能规则。
-5. 首次校验失败时请求 Agent 修复一次。
-6. 编排层使用请求中的 `user_id` 和 `profile_type=user`。
-7. 写入 `job_market_profiles` 并返回保存后的画像。
+1. 根据 `agent_id` 查询启用中的 Agent 模板。
+2. 校验并清理 `job_text`。
+3. 展开模板的系统提示词、结构化输出、工具和运行参数。
+4. 调用能力层 `/agent/run`。
+5. 从 `structured_output` 或 `answer` 中提取岗位画像 JSON。
+6. 使用 Pydantic 校验结构和技能规则。
+7. 首次校验失败时复用同一模板请求 Agent 修复一次。
+8. 编排层使用请求中的 `user_id` 和 `profile_type=user`。
+9. 写入 `job_market_profiles` 并返回保存后的画像。
 
 注意：
 
