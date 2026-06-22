@@ -67,9 +67,9 @@ POST /agent/run
     "deferred_tool_filter_enabled": false
   },
   "runtime_options": {
-    "model": null,
+    "model": "chat_main",
     "temperature": 0.2,
-    "timeout_seconds": 60,
+    "timeout_seconds": null,
     "max_retries": 2
   }
 }
@@ -88,6 +88,8 @@ POST /agent/run
 | `tools` | array | 否 | 本次允许使用的工具名。 |
 | `optional_features` | object | 否 | 可选能力开关。 |
 | `runtime_options` | object | 否 | 模型运行参数。 |
+
+`runtime_options.model` 使用 Agent 根目录 `model_gateway.yaml` 中的模型别名；为空时使用 `defaults.chat`。`timeout_seconds` 为空时使用对应模型的 `timeout`。
 
 注意：
 

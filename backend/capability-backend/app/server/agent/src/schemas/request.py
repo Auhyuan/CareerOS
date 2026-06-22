@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field, field_validator
 class ModelRuntimeOptions(BaseModel):
     """单次模型调用的运行参数。"""
 
-    model: str | None = Field(default=None, description="本次调用使用的模型名称")
+    model: str | None = Field(default=None, description="model_gateway.yaml 中的模型别名；为空时使用 chat_main")
     temperature: float = Field(default=0.2, ge=0, le=2, description="模型采样温度")
-    timeout_seconds: int = Field(default=60, ge=1, description="模型调用超时时间")
+    timeout_seconds: int | None = Field(default=None, ge=1, description="模型调用超时时间；为空时使用模型网关配置")
     max_retries: int = Field(default=2, ge=0, description="模型调用最大重试次数")
 
 

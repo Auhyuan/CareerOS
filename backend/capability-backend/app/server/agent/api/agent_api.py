@@ -28,11 +28,13 @@ def get_current_model_config():
     """查询当前 Agent 服务使用的模型连接配置。
 
     Returns:
-        去除密钥后的模型配置，方便本地调试和排查环境变量是否生效。
+        去除密钥后的模型网关配置，方便确认 YAML 路径、默认模型和可用别名。
     """
     config = get_model_config()
     return Result.success(
         ModelConfigResponse(
+            gateway_path=config.gateway_path,
+            available_models=sorted(config.models),
             provider=config.provider,
             base_url=config.base_url,
             chat_model=config.chat_model,

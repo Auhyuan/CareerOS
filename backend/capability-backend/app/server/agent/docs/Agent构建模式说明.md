@@ -35,9 +35,9 @@
     "deferred_tool_filter_enabled": false
   },
   "runtime_options": {
-    "model": null,
+    "model": "chat_main",
     "temperature": 0.2,
-    "timeout_seconds": 60,
+    "timeout_seconds": null,
     "max_retries": 2
   }
 }
@@ -54,6 +54,7 @@
 - `tools` 是本次允许加载的工具白名单。
 - `optional_features` 是本次运行的能力开关。
 - `runtime_options` 是模型运行参数。
+- `runtime_options.model` 是 Agent 根目录 `model_gateway.yaml` 中的模型别名，空值使用网关默认聊天模型。
 
 ## 总体生命周期
 

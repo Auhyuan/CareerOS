@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 class ModelConfigResponse(BaseModel):
     """脱敏后的模型配置响应。"""
 
+    gateway_path: str = Field(..., description="模型网关 YAML 文件路径")
+    available_models: list[str] = Field(default_factory=list, description="可用模型别名")
     provider: str = Field(..., description="模型供应商类型")
     base_url: str = Field(..., description="OpenAI 兼容接口地址")
     chat_model: str = Field(..., description="默认聊天模型名称")

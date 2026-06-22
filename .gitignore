@@ -19,6 +19,10 @@ ENV/
 .env.*
 !.env.example
 
+# Local model gateway credentials
+**/model_gateway.yaml
+!**/model_gateway.example.yaml
+
 # Browser automation runtime data
 .browser_profile/
 **/.browser_profile/
