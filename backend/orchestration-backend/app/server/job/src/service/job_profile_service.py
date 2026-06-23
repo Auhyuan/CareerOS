@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import Any
 
@@ -16,6 +17,9 @@ from app.server.job.src.schemas.job_profile import (
     JobProfileBatchDeleteResponse,
     JobProfileGenerateRequest,
 )
+
+
+logger = logging.getLogger("orchestration.job.profile")
 
 
 class JobProfileService:
@@ -77,6 +81,12 @@ class JobProfileService:
         assert request.user_id is not None
         assert request.job_text is not None
         cleaned_job_text = self._clean_job_text(request.job_text)
+        logger.info(
+            "Job profile generation started: user_id=%s agent_id=%s text_length=%d",
+            request.user_id,
+            request.agent_id,
+            len(cleaned_job_text),
+        )
 
         # 同一次生成只读取一次模板，首次生成和修复阶段复用同一份 Agent 配置。
         template_config = self._load_profile_agent_config(request.agent_id)
@@ -85,6 +95,11 @@ class JobProfileService:
         try:
             generated_profile = self._validate_generated_profile(agent_result)
         except (ValueError, ValidationError) as first_error:
+            logger.warning(
+                "Job profile first validation failed, attempting one repair: user_id=%s error=%s",
+                request.user_id,
+                first_error,
+            )
             # Agent 可能返回带代码围栏的内容、缺少字段或类型不匹配。
             # 第一版只允许修复一次，避免无限调用模型并产生不可控成本。
             repaired_result = self._repair_agent_output(
@@ -96,6 +111,11 @@ class JobProfileService:
             try:
                 generated_profile = self._validate_generated_profile(repaired_result)
             except (ValueError, ValidationError) as second_error:
+                logger.error(
+                    "Job profile validation failed after repair: user_id=%s error=%s",
+                    request.user_id,
+                    second_error,
+                )
                 raise BusinessException(
                     code=422,
                     msg=f"岗位画像生成结果格式不正确: {second_error}",
@@ -113,7 +133,22 @@ class JobProfileService:
             experience_requirement=generated_profile.experience_requirement,
             certificate_requirement=generated_profile.certificate_requirement,
         )
-        return self.repository.create_profile(profile, db)
+        logger.info(
+            "Job profile validation passed, persisting: user_id=%s job_name=%s required_skills=%d "
+            "preferred_skills=%d",
+            request.user_id,
+            generated_profile.job_name,
+            len(generated_profile.required_skills),
+            len(generated_profile.preferred_skills),
+        )
+        saved_profile = self.repository.create_profile(profile, db)
+        logger.info(
+            "Job profile persisted: profile_id=%s user_id=%s job_name=%s",
+            saved_profile.id,
+            saved_profile.user_id,
+            saved_profile.job_name,
+        )
+        return saved_profile
 
     def _generate_system_profile(
         self,

@@ -1,9 +1,14 @@
+import logging
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.common.schemas.result import Result
+
+
+logger = logging.getLogger("orchestration.exceptions")
 
 
 class BusinessException(Exception):
@@ -53,6 +58,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, error: Exception):
         """处理未被业务代码捕获的未知异常。"""
+        # 未知异常记录完整堆栈，避免被统一响应结构隐藏。
+        logger.exception("Unhandled orchestration error: path=%s", request.url.path)
         return build_error_response(500, f"服务内部错误: {str(error)}")
 
 

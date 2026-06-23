@@ -297,9 +297,14 @@ class JobRepository:
             已保存的岗位画像。
         """
         db.add(profile)
-        db.commit()
-        db.refresh(profile)
-        return profile
+        try:
+            db.commit()
+            db.refresh(profile)
+            return profile
+        except Exception:
+            # 写入失败后必须回滚 Session，否则后续数据库操作会持续处于失败事务状态。
+            db.rollback()
+            raise
 
     def delete_profiles(self, db: Session, profiles: list[JobMarketProfile]) -> None:
         """
