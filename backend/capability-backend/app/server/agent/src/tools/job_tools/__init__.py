@@ -1,6 +1,15 @@
-from app.server.agent.src.tools.job_tools.client import JobToolClient
+from langchain_core.tools import BaseTool
+
 from app.server.agent.src.tools.job_tools.config import JobToolConfig, get_job_tool_config
-from app.server.agent.src.tools.job_tools.tools import create_job_tools
+from app.server.agent.src.tools.job_tools.job_skill import create_job_skill, search_job_skills
 
 
-__all__ = ["JobToolClient", "JobToolConfig", "create_job_tools", "get_job_tool_config"]
+JOB_TOOLS: list[BaseTool] = [search_job_skills, create_job_skill]
+
+__all__ = [
+    "JOB_TOOLS",
+    "JobToolConfig",
+    "create_job_skill",
+    "get_job_tool_config",
+    "search_job_skills",
+]

@@ -229,6 +229,44 @@ class JobRepository:
         """
         return db.get(JobMarketProfile, profile_id)
 
+    def list_user_profiles(
+        self,
+        db: Session,
+        *,
+        user_id: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[JobMarketProfile], int]:
+        """
+        根据用户 ID 分页查询用户生成的岗位画像。
+
+        Args:
+            db: 数据库会话。
+            user_id: 用户 ID。
+            page: 当前页码。
+            page_size: 每页数量。
+
+        Returns:
+            用户岗位画像列表和符合条件的总数。
+        """
+        filters = [
+            JobMarketProfile.user_id == user_id,
+            JobMarketProfile.profile_type == "user",
+        ]
+        base_sql = select(JobMarketProfile).where(*filters)
+        count_sql = select(func.count()).select_from(JobMarketProfile).where(*filters)
+
+        # 用户最近生成或更新的画像优先展示，便于前端直接作为历史记录列表使用。
+        offset = (page - 1) * page_size
+        list_sql = (
+            base_sql.order_by(JobMarketProfile.updated_at.desc(), JobMarketProfile.id.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        rows = list(db.exec(list_sql).all())
+        total = db.exec(count_sql).one()
+        return rows, int(total)
+
     def create_profile(self, profile: JobMarketProfile, db: Session) -> JobMarketProfile:
         """
         保存一条岗位画像。

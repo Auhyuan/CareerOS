@@ -299,11 +299,23 @@ class AgentService:
         # 第七步：提取最终回答。
         answer = result["messages"][-1].content if result.get("messages") else ""
         structured_output = result.get("structured_response") or result.get("structured_output")
+
+        # AIMessage.tool_calls 记录模型实际发出的工具调用。
+        # 统计该值可以区分“工具已装配但模型未选择调用”和“工具执行阶段发生异常”。
+        tool_call_names: list[str] = []
+        for message in result.get("messages") or []:
+            for tool_call in getattr(message, "tool_calls", None) or []:
+                tool_name = tool_call.get("name")
+                if tool_name:
+                    tool_call_names.append(str(tool_name))
         logger.info(
-            "Agent execution completed: thread_id=%s answer_length=%d structured_output=%s elapsed_ms=%.2f",
+            "Agent execution completed: thread_id=%s answer_length=%d structured_output=%s "
+            "tool_call_count=%d tool_calls=%s elapsed_ms=%.2f",
             context.thread_id,
             len(answer) if isinstance(answer, str) else 0,
             structured_output is not None,
+            len(tool_call_names),
+            tool_call_names,
             (time.perf_counter() - run_started_at) * 1000,
         )
 

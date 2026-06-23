@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from sqlmodel import Session
 
 from app.common.core.exceptions import BusinessException
+from app.server.job.src.config.job_config import JOB_DEFAULT_PAGE, JOB_DEFAULT_PAGE_SIZE, JOB_MAX_PAGE_SIZE
 from app.server.job.src.clients import CapabilityAgentClient
 from app.server.job.src.models.job_model import JobMarketProfile
 from app.server.job.src.repository.job_repository import JobRepository
@@ -151,6 +152,41 @@ class JobProfileService:
                 msg=f"profile_type=user 时以下参数不能为空：{field_names}",
             )
 
+    def list_user_profiles(
+        self,
+        db: Session,
+        *,
+        user_id: str,
+        page: int = JOB_DEFAULT_PAGE,
+        page_size: int = JOB_DEFAULT_PAGE_SIZE,
+    ) -> dict[str, Any]:
+        """
+        根据用户 ID 分页查询用户岗位画像。
+
+        Args:
+            db: 数据库会话。
+            user_id: 用户 ID。
+            page: 当前页码。
+            page_size: 每页数量。
+
+        Returns:
+            包含岗位画像列表和分页信息的字典。
+        """
+        safe_page = max(page, 1)
+        safe_page_size = min(max(page_size, 1), JOB_MAX_PAGE_SIZE)
+        rows, total = self.repository.list_user_profiles(
+            db,
+            user_id=user_id,
+            page=safe_page,
+            page_size=safe_page_size,
+        )
+        return {
+            "items": rows,
+            "total": total,
+            "page": safe_page,
+            "page_size": safe_page_size,
+        }
+
     def get_profile_detail(self, db: Session, profile_id: int) -> JobMarketProfile | None:
         """
         根据画像 ID 查询岗位画像详情。
@@ -230,6 +266,7 @@ class JobProfileService:
         Returns:
             能力层 Agent 运行结果。
         """
+        # 固定执行规则由 Agent 模板的 system_prompt 管理；query 只携带本次任务材料。
         query = f"请根据以下岗位材料生成岗位画像：\n\n{cleaned_job_text}"
         payload = self._build_agent_run_payload(query, template_config)
         return self._run_profile_agent(payload)

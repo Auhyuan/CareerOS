@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class JobToolConfig(BaseSettings):
-    """Job 业务工具调用 orchestration-backend 的连接配置。"""
+    """所有 Job 业务工具共享的业务编排层连接配置。"""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -20,7 +20,7 @@ class JobToolConfig(BaseSettings):
 
 def get_job_tool_config() -> JobToolConfig:
     """
-    获取 Job 工具调用配置。
+    获取所有 Job 工具共享的连接配置。
 
     Returns:
         Job 工具连接配置。

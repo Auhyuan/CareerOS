@@ -4,6 +4,7 @@ from app.server.job.src.schemas.job_profile import (
     JobResponsibility,
     PreferredSkill,
     RequiredSkill,
+    UserJobProfileSearchRequest,
 )
 from app.server.job.src.schemas.request import (
     JobDirectionSearchRequest,
@@ -14,6 +15,7 @@ from app.server.job.src.schemas.response import (
     JobCrawlIngestResponse,
     JobDirectionListResponse,
     JobDirectionResponse,
+    JobMarketProfileListResponse,
     JobMarketProfileResponse,
     JobRawRecordListResponse,
     JobRawRecordResponse,
@@ -25,6 +27,7 @@ __all__ = [
     "RequiredSkill",
     "PreferredSkill",
     "GeneratedJobProfile",
+    "UserJobProfileSearchRequest",
     "JobDirectionSearchRequest",
     "JobRawRecordSearchRequest",
     "QcwyJobCrawlAndIngestRequest",
@@ -32,6 +35,7 @@ __all__ = [
     "JobDirectionResponse",
     "JobDirectionListResponse",
     "JobMarketProfileResponse",
+    "JobMarketProfileListResponse",
     "JobRawRecordResponse",
     "JobRawRecordListResponse",
 ]

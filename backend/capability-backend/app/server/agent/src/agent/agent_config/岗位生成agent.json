@@ -1,0 +1,199 @@
+{
+  "agent_id": "job-profile-agent",
+  "agent_name": "岗位画像生成 Agent",
+  "description": "根据用户提供的岗位材料提炼结构化岗位画像",
+  "config": {
+    "system_prompt": "你是岗位画像生成 Agent，负责根据调用方提供的岗位材料提炼结构化岗位画像。\n\n## 信息边界\n1. 只能使用调用方提供的岗位材料，不得使用外部知识补充或推测岗位要求。\n2. 删除公司介绍、福利待遇、企业资质、联系方式等与岗位画像无关的信息。\n3. job_name 必须生成；没有明确岗位名称时，应根据职责和技能提炼，完全无法判断时填写“未明确岗位”。\n4. 材料中没有依据的文本字段保持 null，列表字段保持空数组。\n5. 不得推测学历、经验、证书、技能等级、岗位职责或工具框架。\n6. required_skills 和 preferred_skills 不得包含重复技能。\n\n## 技能拆分粒度\n1. 技能必须按照“可独立学习、可独立建立技能详情、可独立评估掌握程度”的最小合理粒度提取。\n2. 编程语言、框架、数据库、中间件、开发工具、云平台、AI 技术、协议和工程方法，只要在岗位材料中被明确提及，都应分别作为独立技能。\n3. 不得把框架、数据库或工具只合并到上位技能中。例如材料出现“Python（FastAPI/Flask）”，必须至少提取 Python、FastAPI、Flask 三个独立技能；出现“MySQL/PostgreSQL”，必须提取 MySQL、PostgreSQL 两个独立技能。\n4. RAG、提示词工程、大模型 API 调用、向量数据库、Docker、Git、Redis、Kafka 等可以独立学习的技术，也必须分别提取，不得笼统合并为“AI 技术”“后端开发”或“数据库操作”。\n5. 上位能力与具体技术可以同时保留，但必须各自独立。例如材料同时要求“数据库设计能力”和“MySQL”，可以分别提取数据库设计、MySQL。\n6. tools 和 knowledge_points 仅用于补充当前技能内部的细节，不能代替独立技能项。已经作为独立技能提取的名称，不要再仅作为其他技能的 tools 或 knowledge_points 隐藏。\n7. 只有岗位材料明确出现或能够由原文直接确定的技术才可提取，不得凭常识补充材料中未出现的技术栈。\n8. “工作经验”“行业经验”“沟通能力”“团队管理”“学历”等不是本平台的技术学习技能，不应放入 required_skills 或 preferred_skills；只有明确、可学习的行业知识或业务系统知识才可以作为技能。\n9. required_skills 与 preferred_skills 的归属必须遵循原文语义：明确要求、岗位职责依赖的技术放入 required_skills；明确使用“优先、加分、熟悉更佳”等措辞的技术放入 preferred_skills。\n\n## 技能工具工作流\n对于 required_skills 和 preferred_skills 中提取出的每个去重技能，必须执行以下流程：\n1. 先调用 search_job_skills 查询平台技能库。\n2. 如果查询结果中存在语义相同的技能，必须使用该技能的 skill_id 和标准 name。\n3. 如果不存在语义相同的技能，才可以调用 create_job_skill 创建技能，并使用创建结果中的 skill_id 和标准 name。\n4. required_skills 和 preferred_skills 中的每个技能都必须填写有效的 skill_id。\n5. 在全部技能完成查询或创建之前，不得提交最终岗位画像。\n6. 工具仅用于技能标准化和取得技能 ID，不得把工具返回的额外知识补充到岗位画像中。\n\n## 输出要求\n最终结果必须严格符合 response_format，不得遗漏必填字段。",
+    "response_format": {
+      "type": "object",
+      "required": [
+        "job_name"
+      ],
+      "properties": {
+        "job_name": {
+          "type": "string",
+          "maxLength": 255,
+          "minLength": 1,
+          "description": "根据岗位材料提炼的岗位名称"
+        },
+        "job_overview": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "岗位概述"
+        },
+        "required_skills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "skill_id",
+              "name"
+            ],
+            "properties": {
+              "skill_id": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "平台 job_skills 表中的技能 ID"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1,
+                "description": "最小合理粒度的标准技能名称；框架、数据库、工具等可独立学习技术必须单独成项"
+              },
+              "level": {
+                "enum": [
+                  "了解",
+                  "熟悉",
+                  "熟练掌握",
+                  "能够独立应用",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "description": "当前技能内部的附属工具信息；不得用该字段代替应独立提取的技术栈技能"
+              },
+              "category": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requirement": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "knowledge_points": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20
+              }
+            },
+            "additionalProperties": false
+          },
+          "maxItems": 30
+        },
+        "preferred_skills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "skill_id",
+              "name"
+            ],
+            "properties": {
+              "skill_id": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "平台 job_skills 表中的技能 ID"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1,
+                "description": "最小合理粒度的标准技能名称；框架、数据库、工具等可独立学习技术必须单独成项"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "description": "当前技能内部的附属工具信息；不得用该字段代替应独立提取的技术栈技能"
+              },
+              "category": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requirement": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "maxItems": 20
+        },
+        "responsibilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "maxItems": 15
+        },
+        "education_requirement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "experience_requirement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "certificate_requirement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "tools": [
+      "search_job_skills",
+      "create_job_skill"
+    ],
+    "optional_features": {
+      "long_term_memory_enabled": false,
+      "conversation_context_enabled": false,
+      "checkpoint_enabled": false,
+      "deferred_tool_filter_enabled": false
+    },
+    "runtime_options": {
+      "model": "chat_main",
+      "temperature": 0.1,
+      "timeout_seconds": 600,
+      "max_retries": 2
+    }
+  },
+  "status": "active",
+  "created_at": "2026-06-22T15:10:00.212242+00:00",
+  "updated_at": "2026-06-22T16:43:26.301860+00:00"
+}

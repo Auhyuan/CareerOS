@@ -56,6 +56,31 @@ class JobProfileGenerateRequest(BaseModel):
         return cleaned_value or None
 
 
+class UserJobProfileSearchRequest(BaseModel):
+    """根据用户 ID 分页查询用户岗位画像的请求模型。"""
+
+    user_id: str = Field(min_length=1, max_length=100, description="用户 ID")
+    page: int = Field(default=1, ge=1, description="当前页码")
+    page_size: int = Field(default=20, ge=1, le=100, description="每页数量")
+
+    @field_validator("user_id")
+    @classmethod
+    def strip_user_id(cls, value: str) -> str:
+        """
+        清理用户 ID 首尾空白并禁止纯空白值。
+
+        Args:
+            value: 调用方传入的用户 ID。
+
+        Returns:
+            清理后的用户 ID。
+        """
+        cleaned_value = value.strip()
+        if not cleaned_value:
+            raise ValueError("user_id 不能为空")
+        return cleaned_value
+
+
 class JobResponsibility(BaseModel):
     """Agent 输出的岗位职责结构。"""
 
@@ -70,6 +95,7 @@ class RequiredSkill(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    skill_id: int = Field(gt=0, description="平台 job_skills 表中的技能 ID")
     name: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=100)
     level: Literal["了解", "熟悉", "熟练掌握", "能够独立应用"] | None = None
@@ -83,6 +109,7 @@ class PreferredSkill(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    skill_id: int = Field(gt=0, description="平台 job_skills 表中的技能 ID")
     name: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=100)
     requirement: str | None = None

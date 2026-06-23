@@ -77,6 +77,15 @@ class JobMarketProfileResponse(BaseModel):
     updated_at: datetime
 
 
+class JobMarketProfileListResponse(BaseModel):
+    """用户岗位画像分页列表响应模型。"""
+
+    items: list[JobMarketProfileResponse] = Field(default_factory=list, description="用户岗位画像列表")
+    total: int = Field(description="符合条件的岗位画像总数")
+    page: int = Field(description="当前页码")
+    page_size: int = Field(description="每页数量")
+
+
 class JobCrawlIngestResponse(BaseModel):
     """岗位采集并写入原始岗位池的编排响应模型。"""
 

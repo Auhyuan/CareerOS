@@ -4,8 +4,8 @@ from sqlmodel import Session
 from app.common.core.exceptions import BusinessException
 from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
-from app.server.job.src.schemas.job_profile import JobProfileGenerateRequest
-from app.server.job.src.schemas.response import JobMarketProfileResponse
+from app.server.job.src.schemas.job_profile import JobProfileGenerateRequest, UserJobProfileSearchRequest
+from app.server.job.src.schemas.response import JobMarketProfileListResponse, JobMarketProfileResponse
 from app.server.job.src.service import JobProfileService
 
 
@@ -28,6 +28,30 @@ def generate_job_profile(
     """
     profile = job_profile_service.generate_profile(db, request)
     return Result.success(profile)
+
+
+@router.post("/search", response_model=Result[JobMarketProfileListResponse], summary="根据用户 ID 查询岗位画像列表")
+def search_user_job_profiles(
+    request: UserJobProfileSearchRequest,
+    db: Session = Depends(get_postgres_engine),
+):
+    """
+    根据用户 ID 分页查询该用户生成的岗位画像。
+
+    Args:
+        request: 用户 ID 和分页参数。
+        db: 数据库会话。
+
+    Returns:
+        用户岗位画像分页列表。
+    """
+    result = job_profile_service.list_user_profiles(
+        db,
+        user_id=request.user_id,
+        page=request.page,
+        page_size=request.page_size,
+    )
+    return Result.success(result)
 
 
 @router.get("/{profile_id}", response_model=Result[JobMarketProfileResponse], summary="查询岗位画像详情")

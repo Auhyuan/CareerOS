@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from app.server.agent.src.tools.base import AgentToolDefinition
-from app.server.agent.src.tools.job_tools import create_job_tools
+from app.server.agent.src.tools.job_tools import JOB_TOOLS
 from app.server.agent.src.tools.registry import AgentToolRegistry
 
 
@@ -29,7 +29,7 @@ class AgentToolService:
 
         Job 工具只负责调用 orchestration-backend API，不直接访问 Job 数据库。
         """
-        for tool in create_job_tools():
+        for tool in JOB_TOOLS:
             self.registry.register(
                 AgentToolDefinition(
                     name=tool.name,
