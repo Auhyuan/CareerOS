@@ -4,6 +4,8 @@ from sqlmodel import Session
 from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
 from app.server.job.src.schemas.job_skill import (
+    JobSkillBatchDeleteRequest,
+    JobSkillBatchDeleteResponse,
     JobSkillCreateRequest,
     JobSkillCreateResponse,
     JobSkillSearchRequest,
@@ -51,4 +53,25 @@ def create_job_skill(
         统一响应结构，data 中包含技能和是否新建的标记。
     """
     result = job_skill_service.create_skill(db, request)
+    return Result.success(result)
+
+
+@router.post("/delete", response_model=Result[JobSkillBatchDeleteResponse], summary="批量删除岗位技能")
+def delete_job_skills(
+    request: JobSkillBatchDeleteRequest,
+    db: Session = Depends(get_postgres_engine),
+):
+    """
+    根据技能 ID 列表批量删除岗位技能。
+
+    请求中不存在的 ID 不会抛错，会一起返回到 missing_ids，便于前端提示。
+
+    Args:
+        request: 批量删除请求，包含去重后的技能 ID 列表。
+        db: PostgreSQL 数据库会话。
+
+    Returns:
+        统一响应结构，data 中包含已删除 / 缺失的技能 ID 统计信息。
+    """
+    result = job_skill_service.delete_skills(db, request)
     return Result.success(result)

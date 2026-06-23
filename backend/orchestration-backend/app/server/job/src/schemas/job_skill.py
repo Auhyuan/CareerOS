@@ -76,3 +76,48 @@ class JobSkillCreateResponse(BaseModel):
 
     skill: JobSkillResponse = Field(description="创建或复用的岗位技能")
     created: bool = Field(description="本次是否创建了新技能")
+
+
+class JobSkillBatchDeleteRequest(BaseModel):
+    """岗位技能批量删除请求。"""
+
+    skill_ids: list[int] = Field(
+        min_length=1,
+        max_length=500,
+        description="待删除的岗位技能 ID 列表，单次最多 500 条",
+    )
+
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, value: list[int]) -> list[int]:
+        """
+        校验技能 ID 列表，去重并保证全部为正整数。
+
+        Args:
+            value: 调用方传入的技能 ID 列表。
+
+        Returns:
+            去重后保序的技能 ID 列表。
+        """
+        if any(skill_id <= 0 for skill_id in value):
+            raise ValueError("skill_ids 只能包含正整数")
+        # 保序去重，避免同一条 ID 被重复删除。
+        seen: set[int] = set()
+        unique_ids: list[int] = []
+        for skill_id in value:
+            if skill_id not in seen:
+                seen.add(skill_id)
+                unique_ids.append(skill_id)
+        return unique_ids
+
+
+class JobSkillBatchDeleteResponse(BaseModel):
+    """岗位技能批量删除结果。"""
+
+    requested: int = Field(description="请求中包含的技能 ID 数量（去重后）")
+    deleted: int = Field(description="本次实际删除的技能数量")
+    deleted_ids: list[int] = Field(default_factory=list, description="本次已删除的技能 ID")
+    missing_ids: list[int] = Field(
+        default_factory=list,
+        description="请求中提供但数据库中不存在的技能 ID",
+    )

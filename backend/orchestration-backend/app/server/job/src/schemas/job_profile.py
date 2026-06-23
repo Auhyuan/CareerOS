@@ -144,3 +144,48 @@ class GeneratedJobProfile(BaseModel):
         if not cleaned_value:
             raise ValueError("job_name 不能为空")
         return cleaned_value
+
+
+class JobProfileBatchDeleteRequest(BaseModel):
+    """岗位画像批量删除请求。"""
+
+    profile_ids: list[int] = Field(
+        min_length=1,
+        max_length=500,
+        description="待删除的岗位画像 ID 列表，单次最多 500 条",
+    )
+
+    @field_validator("profile_ids")
+    @classmethod
+    def validate_profile_ids(cls, value: list[int]) -> list[int]:
+        """
+        校验画像 ID 列表，去重并保证全部为正整数。
+
+        Args:
+            value: 调用方传入的画像 ID 列表。
+
+        Returns:
+            去重后保序的画像 ID 列表。
+        """
+        if any(profile_id <= 0 for profile_id in value):
+            raise ValueError("profile_ids 只能包含正整数")
+        # 保序去重，避免同一条 ID 被重复删除。
+        seen: set[int] = set()
+        unique_ids: list[int] = []
+        for profile_id in value:
+            if profile_id not in seen:
+                seen.add(profile_id)
+                unique_ids.append(profile_id)
+        return unique_ids
+
+
+class JobProfileBatchDeleteResponse(BaseModel):
+    """岗位画像批量删除结果。"""
+
+    requested: int = Field(description="请求中包含的画像 ID 数量（去重后）")
+    deleted: int = Field(description="本次实际删除的画像数量")
+    deleted_ids: list[int] = Field(default_factory=list, description="本次已删除的画像 ID")
+    missing_ids: list[int] = Field(
+        default_factory=list,
+        description="请求中提供但数据库中不存在的画像 ID",
+    )

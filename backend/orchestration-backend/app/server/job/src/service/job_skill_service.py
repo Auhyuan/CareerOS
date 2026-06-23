@@ -5,6 +5,8 @@ from sqlmodel import Session
 
 from app.server.job.src.repository.job_skill_repository import JobSkillRepository
 from app.server.job.src.schemas.job_skill import (
+    JobSkillBatchDeleteRequest,
+    JobSkillBatchDeleteResponse,
     JobSkillCreateRequest,
     JobSkillCreateResponse,
     JobSkillResponse,
@@ -67,6 +69,35 @@ class JobSkillService:
         return JobSkillCreateResponse(
             skill=JobSkillResponse.model_validate(skill),
             created=created,
+        )
+
+    def delete_skills(self, db: Session, request: JobSkillBatchDeleteRequest) -> JobSkillBatchDeleteResponse:
+        """
+        批量删除岗位技能。
+
+        对于请求中不存在的技能 ID，会放入 missing_ids 一起返回，不抛异常，
+        方便前端一次性提示用户哪些 ID 已经失效。
+
+        Args:
+            db: 数据库会话。
+            request: 批量删除请求，包含去重后的技能 ID 列表。
+
+        Returns:
+            批量删除结果，包含已删除 ID 和缺失 ID。
+        """
+        existing_skills = self.repository.list_by_ids(db, request.skill_ids)
+        existing_ids = {skill.id for skill in existing_skills}
+        missing_ids = [skill_id for skill_id in request.skill_ids if skill_id not in existing_ids]
+        deleted_ids = sorted(existing_ids)
+
+        if existing_skills:
+            self.repository.delete_skills(db, existing_skills)
+
+        return JobSkillBatchDeleteResponse(
+            requested=len(request.skill_ids),
+            deleted=len(deleted_ids),
+            deleted_ids=deleted_ids,
+            missing_ids=missing_ids,
         )
 
     @staticmethod

@@ -12,6 +12,8 @@ from app.server.job.src.models.job_model import JobMarketProfile
 from app.server.job.src.repository.job_repository import JobRepository
 from app.server.job.src.schemas.job_profile import (
     GeneratedJobProfile,
+    JobProfileBatchDeleteRequest,
+    JobProfileBatchDeleteResponse,
     JobProfileGenerateRequest,
 )
 
@@ -197,6 +199,41 @@ class JobProfileService:
             岗位画像详情；不存在时返回 None。
         """
         return self.repository.get_profile_by_id(profile_id, db)
+
+    def delete_profiles(
+        self,
+        db: Session,
+        request: JobProfileBatchDeleteRequest,
+    ) -> JobProfileBatchDeleteResponse:
+        """
+        批量删除岗位画像。
+
+        对于请求中不存在的画像 ID，会放入 missing_ids 一起返回，不抛异常，
+        方便前端一次性提示用户哪些 ID 已经失效。
+
+        Args:
+            db: 数据库会话。
+            request: 批量删除请求，包含去重后的画像 ID 列表。
+
+        Returns:
+            批量删除结果，包含已删除 ID 和缺失 ID。
+        """
+        existing_profiles = self.repository.list_profiles_by_ids(db, request.profile_ids)
+        existing_ids = {profile.id for profile in existing_profiles}
+        missing_ids = [
+            profile_id for profile_id in request.profile_ids if profile_id not in existing_ids
+        ]
+        deleted_ids = sorted(existing_ids)
+
+        if existing_profiles:
+            self.repository.delete_profiles(db, existing_profiles)
+
+        return JobProfileBatchDeleteResponse(
+            requested=len(request.profile_ids),
+            deleted=len(deleted_ids),
+            deleted_ids=deleted_ids,
+            missing_ids=missing_ids,
+        )
 
     def _clean_job_text(self, job_text: str) -> str:
         """

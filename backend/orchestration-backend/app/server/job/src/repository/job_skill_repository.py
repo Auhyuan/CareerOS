@@ -22,6 +22,34 @@ class JobSkillRepository:
         statement = select(JobSkill).where(JobSkill.normalized_name == normalized_name)
         return db.exec(statement).first()
 
+    def list_by_ids(self, db: Session, skill_ids: list[int]) -> list[JobSkill]:
+        """
+        根据技能 ID 列表查询技能，用于批量删除前的存在性校验。
+
+        Args:
+            db: 数据库会话。
+            skill_ids: 技能 ID 列表。
+
+        Returns:
+            数据库中实际存在的技能列表。
+        """
+        if not skill_ids:
+            return []
+        statement = select(JobSkill).where(col(JobSkill.id).in_(skill_ids))
+        return list(db.exec(statement).all())
+
+    def delete_skills(self, db: Session, skills: list[JobSkill]) -> None:
+        """
+        批量删除岗位技能。
+
+        Args:
+            db: 数据库会话。
+            skills: 待删除的技能对象列表。
+        """
+        for skill in skills:
+            db.delete(skill)
+        db.commit()
+
     def search(
         self,
         db: Session,

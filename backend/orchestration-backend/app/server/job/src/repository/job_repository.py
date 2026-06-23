@@ -229,6 +229,26 @@ class JobRepository:
         """
         return db.get(JobMarketProfile, profile_id)
 
+    def list_profiles_by_ids(
+        self,
+        db: Session,
+        profile_ids: list[int],
+    ) -> list[JobMarketProfile]:
+        """
+        根据画像 ID 列表查询画像，用于批量删除前的存在性校验。
+
+        Args:
+            db: 数据库会话。
+            profile_ids: 画像 ID 列表。
+
+        Returns:
+            数据库中实际存在的画像列表。
+        """
+        if not profile_ids:
+            return []
+        statement = select(JobMarketProfile).where(col(JobMarketProfile.id).in_(profile_ids))
+        return list(db.exec(statement).all())
+
     def list_user_profiles(
         self,
         db: Session,
@@ -280,3 +300,14 @@ class JobRepository:
         db.commit()
         db.refresh(profile)
         return profile
+
+    def delete_profiles(self, db: Session, profiles: list[JobMarketProfile]) -> None:
+        """
+        批量删除岗位画像。
+        Args:
+            db: 数据库会话。
+            profiles: 待删除的岗位画像对象列表。
+        """
+        for profile in profiles:
+            db.delete(profile)
+        db.commit()
