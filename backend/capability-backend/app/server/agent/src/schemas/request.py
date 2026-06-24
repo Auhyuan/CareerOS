@@ -16,7 +16,6 @@ class AgentOptionalFeatures(BaseModel):
     """本次 Agent 运行可选择开启的增强能力。"""
 
     long_term_memory_enabled: bool = Field(default=False, description="是否启用长期记忆能力")
-    conversation_context_enabled: bool = Field(default=False, description="是否启用会话上下文增强")
     deferred_tool_filter_enabled: bool = Field(default=False, description="是否启用延迟工具筛选能力")
 
 
@@ -29,6 +28,7 @@ class AgentRunRequest(BaseModel):
 
     query: str = Field(..., min_length=1, description="用户输入或编排层传入的任务指令")
     conversation_id: str | None = Field(default=None, description="会话 ID 或任务线程 ID")
+    stream: bool = Field(default=False, description="是否使用 SSE 流式返回；true 时 /agent/run 返回 text/event-stream")
     system_prompt: str | None = Field(default=None, description="本次运行使用的系统提示词")
     response_format: dict[str, Any] | None = Field(
         default=None,

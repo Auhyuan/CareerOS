@@ -63,6 +63,16 @@ GET  /agent/health
 GET  /agent/model/config
 GET  /agent/capabilities
 POST /agent/run
+
+流式模式：
+
+```text
+POST /agent/run
+  stream=false -> 统一 JSON Result
+  stream=true  -> SSE text/event-stream
+```
+
+SSE 事件由 `AgentService.stream()` 产出，API 层只负责序列化为 `event/data` 格式。
 POST /agent/conversations/search
 POST /agent/conversations/messages
 POST /agent/templates/upsert
@@ -133,33 +143,24 @@ service.py
 
 ```text
 1. build_context
-   构建本次运行上下文。
-
+   构建本次运行上下文；conversation_id 非空时作为持久 thread_id，空值时生成临时 thread_id。
 2. ensure_conversation
-   如果开启会话上下文，则确保 conversation 存在。
-
-3. load history messages
-   如果开启会话上下文，则读取最近历史消息。
-
+   如果传入 conversation_id，则确保用户可见 conversation 存在。
+3. prepare checkpoint memory
+   模型可见历史由 checkpointer 根据 thread_id 恢复，不从 agent_messages 读取。
 4. assemble_agent
    组装模型、工具、prompt、middleware、checkpointer。
-
 5. build input messages
-   把历史消息和本轮用户问题合并成 LangChain 输入。
-
+   只把本轮用户问题作为 LangChain 输入；历史 messages 由 checkpointer 恢复。
 6. save user message
-   如果开启会话上下文，则写入用户消息。
-
+   如果传入 conversation_id，则写入用户消息。
 7. agent.ainvoke
    真实运行 Agent。
-
 8. extract answer
    从返回消息里提取最终回答。
-
 9. save assistant message
-   如果开启会话上下文，则写入 Agent 回复。
+   如果传入 conversation_id，则写入 Agent 回复。
 ```
-
 ## src/model
 
 模型层负责统一创建模型实例。
@@ -371,7 +372,7 @@ Memory 层是长期记忆能力的预留层。
 - 长期任务记忆
 - 画像类记忆
 
-目前会话上下文不归 Memory 层负责，而是由 `ContextService` 管理。
+目前模型可见会话记忆由 LangGraph checkpointer 管理；`ContextService` 只负责用户可见会话记录。
 
 ## src/schemas
 
@@ -386,7 +387,7 @@ Schemas 层定义请求、响应和内部配置对象。
 - `AgentBuildConfig` 是 Agent 内部装配配置
 - `AgentRunResponse` 是 Agent 运行响应
 
-当前可选能力里，`conversation_context_enabled` 表示是否启用会话上下文。
+`conversation_id` 非空表示持久会话：复用 checkpointer thread，并写入用户可见会话记录；`conversation_id` 为空表示临时任务调用。
 
 ## run 接口调用链路
 
@@ -397,7 +398,7 @@ agent_api.py
   -> AgentService.run()
     -> RuntimeContextService.build_context()
     -> ContextService.ensure_conversation()
-    -> ContextService.get_recent_messages()
+    -> Checkpointer 根据 thread_id 恢复模型可见历史
     -> AgentService.assemble_agent()
       -> build_agent_assembly_config()
       -> PromptService.render_system_prompt()
@@ -497,5 +498,5 @@ agent_api.py
 - Runtime context 传递外部业务参数。
 - LangGraph state 保存执行中间结果。
 - Checkpointer 负责图状态持久化。
-- ContextService 负责业务会话历史。
+- ContextService 负责用户可见会话记录。
 - Templates 负责 Agent 默认配置。

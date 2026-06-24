@@ -195,7 +195,7 @@ JobProfilePromptMiddleware
 - `create_agent` 装配中间件
 - `checkpointer` 接入 PostgreSQL
 - 基础 middleware 已声明 `state_schema = CareerAgentState`
-- 运行开始时通过 `RemoveMessage(REMOVE_ALL_MESSAGES)` 清理 checkpoint 中的旧 messages，避免和 ContextService 历史重复
+- 模型可见的跨轮会话记忆由 checkpointer 按 thread_id 恢复，不再使用 `RemoveMessage(REMOVE_ALL_MESSAGES)` 清理历史 messages
 
 当前项目还没有完成：
 

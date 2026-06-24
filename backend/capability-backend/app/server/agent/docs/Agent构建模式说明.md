@@ -23,6 +23,7 @@
 {
   "query": "用户问题或任务指令",
   "conversation_id": "可选会话ID",
+  "stream": false,
   "system_prompt": "可选系统提示词",
   "response_format": null,
   "inputs": {},
@@ -30,7 +31,6 @@
   "tools": [],
   "optional_features": {
     "long_term_memory_enabled": false,
-    "conversation_context_enabled": false,
     "deferred_tool_filter_enabled": false
   },
   "runtime_options": {
@@ -45,7 +45,8 @@
 其中：
 
 - `query` 是本轮用户问题或任务指令。
-- `conversation_id` 用于会话上下文和 LangGraph thread_id。
+- `conversation_id` 用于控制是否复用会话记忆：非空时作为 LangGraph thread_id；为空时生成临时 thread_id。
+- `stream` 控制 `/agent/run` 的响应协议：false 返回统一 JSON，true 返回 SSE `text/event-stream`。
 - `system_prompt` 控制本次 Agent 的系统提示词。
 - `response_format` 接收可选 JSON Schema，非空时启用 LangChain 结构化输出。
 - `inputs` 是业务变量，供 prompt、工具、中间件读取。
@@ -65,7 +66,7 @@ HTTP 请求
   -> AgentRunRequest
   -> AgentService.run()
   -> 构建 runtime context
-  -> 按需从 ContextService 读取会话历史
+  -> 根据 conversation_id 判断是否准备用户可见会话记录
   -> assemble_agent()
   -> create_agent()
   -> 构建 LangGraph messages 输入
@@ -83,7 +84,7 @@ HTTP 请求
 1. 接口接收请求
 2. 请求参数校验
 3. 构建 runtime context
-4. 按需读取会话历史
+4. 如果 conversation_id 非空，则准备用户可见会话记录
 5. 生成 Agent 装配配置
 6. 渲染 system prompt
 7. 加载工具
@@ -93,11 +94,11 @@ HTTP 请求
 11. 获取 checkpointer
 12. 调用 create_agent
 13. 构建 messages 输入
-14. 用 RemoveMessage 清理 checkpoint 中的旧 messages
+14. 只追加本轮用户消息，历史由 checkpointer 按 thread_id 恢复
 15. 执行 agent.ainvoke
 16. 提取最终回答
 17. 处理长期记忆占位逻辑
-18. 保存用户消息和 Agent 回复
+18. 如果 conversation_id 非空，则保存用户消息和 Agent 回复
 19. 返回统一响应
 ```
 
@@ -158,85 +159,52 @@ thread_id = request.conversation_id or uuid4().hex
 
 也就是说：
 
-- 如果传入 `conversation_id`，本次运行沿用这条会话线。
-- 如果没有传入，系统生成一个临时线程 ID。
+- 如果传入 `conversation_id`，本次运行沿用这条会话线，模型可见历史由同一个 checkpointer thread 恢复，并写入用户可见会话记录。
+- 如果没有传入，系统生成一个临时线程 ID，适合 A2A 子 Agent 或一次性任务调用；不会写入用户可见会话记录。
 
-## 会话上下文
+## 会话记忆与展示记录
 
-如果开启：
-
-```json
-{
-  "optional_features": {
-    "conversation_context_enabled": true
-  }
-}
-```
-
-那么服务会使用 `conversation_id/thread_id` 从 ContextService 读取历史消息。
-
-当前逻辑是：
-
-```python
-recent_messages = self.context_service.get_recent_messages(
-    db,
-    conversation_id=context.thread_id,
-    limit=20,
-)
-history_messages = self.context_service.to_langchain_messages(recent_messages)
-```
-
-这里的历史消息来自业务会话表：
+当前设计里，Agent 可见的会话记忆和用户可见的会话记录是两套东西。
 
 ```text
-agent.agent_conversations
-agent.agent_messages
-```
-
-ContextService 是跨轮会话历史的唯一来源。
-
-外部请求不再传 `input_messages`，避免和服务端根据 `conversation_id` 读取出的历史重复。
-
-## Checkpointer 和 ContextService 的边界
-
-这是当前设计里最重要的边界。
-
-```text
-ContextService
-  管跨轮对话历史，面向用户展示，也用于下一轮 Agent 理解历史。
-
 Checkpointer
-  管 LangGraph 执行状态，面向本轮或同一 thread 内的工具调用、中间 state、流程恢复和排查。
+  负责模型可见的跨轮会话记忆和 LangGraph state。
+  同一个 conversation_id 会作为同一个 thread_id 传给 LangGraph，
+  因此模型可以从 checkpoint 中恢复历史 messages。
+
+ContextService / agent_messages
+  只负责用户可见的展示记录。
+  它保存用户问题和 Agent 最终回复，方便前端展示、后续摘要和业务查询。
+  它不再作为模型下一轮输入的历史来源。
 ```
 
-两者都使用 `conversation_id/thread_id`，但职责不同。
+当 `conversation_id` 非空时，服务会确保 `agent_conversations` 存在，并在运行前后写入用户可见消息；但不会从 `agent_messages` 读取历史再注入给模型。
 
-如果不处理，checkpointer 恢复出的旧 `state.messages` 和 ContextService 读取出的历史消息可能重复。
-
-因此我们参考 `agent_engine` 的做法，在每次运行输入 messages 时先加入：
-
-```python
-RemoveMessage(id=REMOVE_ALL_MESSAGES)
-```
-
-然后再注入 ContextService 构建出来的历史消息和本轮用户消息。
+当 `conversation_id` 为空时，本次调用使用临时 thread_id，只保留 checkpointer 执行状态，不写入 `agent_messages`。
 
 当前输入构造方式：
 
 ```python
 input_messages = [
-    RemoveMessage(id=REMOVE_ALL_MESSAGES),
-    *history_messages,
     {"role": "user", "content": request.query},
 ]
+```
+
+运行时仍然使用同一个 `thread_id`：
+
+```python
+result = await agent.ainvoke(
+    {"messages": input_messages},
+    config={"configurable": {"thread_id": context.thread_id}},
+)
 ```
 
 这样可以保证：
 
 ```text
-模型看到的跨轮历史只来自 ContextService。
-checkpointer 不再把旧 messages 作为历史来源重复注入。
-checkpointer 仍然可以保存本轮工具调用、中间 state、结构化结果等执行状态。
+模型看到的跨轮历史来自 checkpointer。
+用户看到的聊天记录来自 agent_messages。
+工具调用、多轮执行状态和中间 state 保留在 LangGraph checkpoint / 后续 run_events 中。
 ```
 
 ## Agent 装配配置
@@ -264,7 +232,7 @@ checkpointer 是平台默认基础能力，不再通过 optional_features 开关
 
 ```text
 会话创建
-历史消息读取
+展示会话准备
 消息写入
 业务数据查询
 岗位画像落库
@@ -415,7 +383,7 @@ checkpointer 保存 LangGraph state。
 ContextService 保存业务会话历史。
 ```
 
-运行开始时通过 `RemoveMessage(REMOVE_ALL_MESSAGES)` 清理 checkpoint 中的旧 messages，避免双历史。
+运行开始时不清理 checkpoint messages；同一个 thread_id 下的历史 messages 会作为模型可见会话记忆继续保留。
 
 ## create_agent
 
@@ -475,7 +443,7 @@ result = await assembly.agent.ainvoke(
 
 ```text
 messages:
-  模型可见的消息，包括清理指令、历史消息、本轮用户消息。
+  模型可见的消息包括 checkpointer 恢复的历史 messages 和本轮用户消息。
 
 config.configurable.thread_id:
   LangGraph checkpointer 使用的线程 ID。
@@ -513,7 +481,7 @@ context:
 
 ## 消息写入
 
-如果开启会话上下文，运行前会写入用户消息：
+如果 `conversation_id` 非空，运行前会写入用户消息：
 
 ```python
 self.context_service.add_user_message(
@@ -535,7 +503,7 @@ self.context_service.add_assistant_message(
 )
 ```
 
-当前会话历史不记录 `agent_id`、`request_id` 或调用方 metadata。
+当前用户可见会话记录不记录 `agent_id`、`request_id` 或调用方 metadata。
 
 会话历史只围绕：
 
@@ -546,6 +514,36 @@ content
 created_at
 ```
 
+## 流式输出
+
+`/agent/run` 支持通过 `stream` 参数切换流式返回：
+
+```json
+{
+  "query": "你好",
+  "stream": true
+}
+```
+
+当 `stream=false` 时，接口返回统一 `code/msg/data` JSON。
+
+当 `stream=true` 时，接口返回 `text/event-stream`，不再使用统一 Result 包装。当前事件类型包括：
+
+```text
+run_start
+agent_assembled
+model_start
+reasoning_delta
+model_delta
+model_end
+tool_call_start
+tool_call_result
+final
+run_end
+error
+```
+
+其中 `reasoning_delta` 只有模型供应商显式返回思考内容时才会出现。
 ## 返回响应
 
 最终返回：
@@ -570,25 +568,19 @@ AgentRunResponse(
 }
 ```
 
-## 与 agent_engine 的对应关系
+## 与 agent_engine 的差异
 
-`agent_engine` 的核心思路是：
+我们参考了 `agent_engine` 的 state / checkpointer 思路，但当前项目的会话记忆边界做了调整：
 
 ```text
 conversation_id
-  -> ContextService.get_context_messages(conversation_id)
-  -> build_input_msgs(...)
-  -> [RemoveMessage(REMOVE_ALL_MESSAGES), ...history, current_user_message]
-  -> agent.ainvoke(..., thread_id=conversation_id)
+  -> 作为 LangGraph thread_id
+  -> checkpointer 恢复模型可见历史 messages
+  -> 本轮只追加当前 user message
+  -> agent_messages 只保存用户可见问题和最终回复
 ```
 
-我们当前项目采用同样的历史来源规则：
-
-```text
-ContextService 是跨轮会话历史来源。
-RemoveMessage 清理 checkpoint 中的旧 messages。
-checkpointer 只负责 LangGraph state 持久化。
-```
+因此本项目不再使用 `RemoveMessage(REMOVE_ALL_MESSAGES)` 清理 checkpoint messages，也不再把 ContextService 历史消息注入模型。
 
 ## 当前已完成
 
@@ -605,9 +597,9 @@ RuntimeContextService
 MiddlewareFactory
 CareerAgentState
 PostgreSQL Checkpointer
-ContextService 会话历史
+ContextService 展示会话记录
 TemplateService 模板 CRUD
-RemoveMessage 清理 checkpoint messages
+Checkpointer 恢复模型可见历史 messages
 ```
 
 当前还没有完成：
@@ -643,6 +635,6 @@ TemplateService 负责 Agent 默认配置。
 ```text
 ContextService 管跨轮历史。
 Checkpointer 管本轮执行状态。
-RemoveMessage 防止双历史。
+agent_messages 不再注入模型，因此不会和 checkpoint 历史形成双历史。
 /agent/run 只负责真实执行。
 ```

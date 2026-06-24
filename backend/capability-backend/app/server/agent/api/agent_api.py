@@ -1,4 +1,9 @@
+import json
+from typing import Any
+
 from fastapi import APIRouter, Depends
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from app.common.db.postgres_db import get_postgres_engine
@@ -90,16 +95,45 @@ def get_agent_capabilities():
     )
 
 
+def _format_sse_event(event: dict[str, Any]) -> str:
+    """将平台事件字典格式化为 SSE 文本。
+    Args:
+        event: AgentService.stream 产出的标准化事件。
+    Returns:
+        符合 text/event-stream 协议的单条事件文本。
+    """
+    event_type = str(event.get("type") or "message")
+    payload = json.dumps(jsonable_encoder(event), ensure_ascii=False)
+    return f"event: {event_type}\ndata: {payload}\n\n"
+
+
 @router.post("/run", response_model=Result[AgentRunResponse], summary="运行通用 Agent")
 async def run_agent(request: AgentRunRequest, db: Session = Depends(get_postgres_engine)):
     """运行通用 Agent。
-
     Args:
-        request: Agent 运行请求。通过 tools 控制本次可用工具，通过 inputs 注入业务变量。
-        db: PostgreSQL Session，用于按需读写会话上下文。
-
+        request: Agent 运行请求。stream=false 时返回统一 JSON；stream=true 时返回 SSE。
+        db: PostgreSQL Session，用于在 conversation_id 非空时写入用户可见会话记录。
     Returns:
-        Agent 运行结果。
+        非流式时返回 Agent 运行结果；流式时返回 text/event-stream。
     """
-    result = await agent_service.run(request, db)
-    return Result.success(result)
+    if request.stream:
+        async def event_generator():
+            """按 SSE 格式逐条产出 Agent 运行事件。
+            Yields:
+                已格式化的 SSE 文本片段。
+            """
+            async for event in agent_service.stream(request, db):
+                yield _format_sse_event(event)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    else:
+        result = await agent_service.run(request, db)
+        return Result.success(result)
