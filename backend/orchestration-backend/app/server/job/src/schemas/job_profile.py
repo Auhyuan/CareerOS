@@ -98,8 +98,8 @@ class RequiredSkill(BaseModel):
     skill_id: int = Field(gt=0, description="平台 job_skills 表中的技能 ID")
     name: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=100)
-    level: Literal["了解", "熟悉", "熟练掌握", "能够独立应用"] | None = None
-    requirement: str | None = None
+    level: int = Field(default=0, ge=0, description="技能等级：0=未明确，1=了解，2=熟悉，3=掌握，4=精通")
+    requirement: str | None = Field(default=None, description="根据岗位原文提炼的具体技能要求")
     knowledge_points: list[str] = Field(default_factory=list, max_length=20)
     tools: list[str] = Field(default_factory=list, max_length=20)
 
@@ -112,7 +112,8 @@ class PreferredSkill(BaseModel):
     skill_id: int = Field(gt=0, description="平台 job_skills 表中的技能 ID")
     name: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=100)
-    requirement: str | None = None
+    level: int = Field(default=0, ge=0, description="技能等级：0=未明确，1=了解，2=熟悉，3=掌握，4=精通")
+    requirement: str | None = Field(default=None, description="根据岗位原文提炼的具体技能要求")
     tools: list[str] = Field(default_factory=list, max_length=20)
 
 
