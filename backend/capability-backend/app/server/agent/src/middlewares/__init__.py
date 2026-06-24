@@ -1,17 +1,17 @@
-from app.server.agent.src.middlewares.base import AgentMiddleware, AgentMiddlewareChain
 from app.server.agent.src.middlewares.factory import MiddlewareFactory
-from app.server.agent.src.middlewares.memory_placeholder import create_memory_placeholder_middleware
-from app.server.agent.src.middlewares.tool_args_inject import create_tool_args_inject_middleware
-from app.server.agent.src.middlewares.tool_error_handler import create_tool_error_handler_middleware
-from app.server.agent.src.middlewares.tool_logging import create_tool_logging_middleware
-
+from app.server.agent.src.middlewares.memory_placeholder_middleware import MemoryPlaceholderMiddleware
+from app.server.agent.src.middlewares.retrieval_context_middleware import InjectRetrievalContextMiddleware
+from app.server.agent.src.middlewares.single_tool_call_middleware import SingleToolCallMiddleware
+from app.server.agent.src.middlewares.tool_args_inject_middleware import ToolArgsInjectMiddleware
+from app.server.agent.src.middlewares.tool_error_handler_middleware import ToolErrorHandlerMiddleware
+from app.server.agent.src.middlewares.tool_logging_middleware import ToolLoggingMiddleware
 
 __all__ = [
-    "AgentMiddleware",
-    "AgentMiddlewareChain",
+    "InjectRetrievalContextMiddleware",
+    "MemoryPlaceholderMiddleware",
     "MiddlewareFactory",
-    "create_memory_placeholder_middleware",
-    "create_tool_args_inject_middleware",
-    "create_tool_error_handler_middleware",
-    "create_tool_logging_middleware",
+    "SingleToolCallMiddleware",
+    "ToolArgsInjectMiddleware",
+    "ToolErrorHandlerMiddleware",
+    "ToolLoggingMiddleware",
 ]

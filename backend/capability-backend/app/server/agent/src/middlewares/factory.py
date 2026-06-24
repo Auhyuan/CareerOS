@@ -1,3 +1,9 @@
+from app.server.agent.src.middlewares.memory_placeholder_middleware import MemoryPlaceholderMiddleware
+from app.server.agent.src.middlewares.retrieval_context_middleware import InjectRetrievalContextMiddleware
+from app.server.agent.src.middlewares.single_tool_call_middleware import SingleToolCallMiddleware
+from app.server.agent.src.middlewares.tool_args_inject_middleware import ToolArgsInjectMiddleware
+from app.server.agent.src.middlewares.tool_error_handler_middleware import ToolErrorHandlerMiddleware
+from app.server.agent.src.middlewares.tool_logging_middleware import ToolLoggingMiddleware
 from app.server.agent.src.schemas.config import AgentFeatureConfig
 
 
@@ -16,29 +22,24 @@ class MiddlewareFactory:
         current_features = features or AgentFeatureConfig()
         middlewares: list[object] = []
 
-        # 基础能力：工具异常处理。默认开启，避免普通工具报错直接打断整个 Agent 流程。
-        if current_features.enable_tool_error_handler:
-            from app.server.agent.src.middlewares.tool_error_handler import create_tool_error_handler_middleware
+        # 基础能力：单工具调用限制。默认开启，避免模型并发调用多个工具时写 state 冲突。
+        middlewares.append(SingleToolCallMiddleware())
 
-            middlewares.append(create_tool_error_handler_middleware())
+        # 基础能力：工具异常处理。始终开启，避免普通工具报错直接打断整个 Agent 流程。
+        middlewares.append(ToolErrorHandlerMiddleware())
 
         # 基础能力：工具参数注入。默认开启，只有工具声明注入参数时才真正生效。
-        if current_features.enable_tool_args_injection:
-            from app.server.agent.src.middlewares.tool_args_inject import create_tool_args_inject_middleware
-
-            middlewares.append(create_tool_args_inject_middleware())
+        middlewares.append(ToolArgsInjectMiddleware())
 
         # 基础能力：工具调用日志。默认开启，方便后续排查 Agent 为什么调用了某个工具。
-        if current_features.enable_tool_logging:
-            from app.server.agent.src.middlewares.tool_logging import create_tool_logging_middleware
-
-            middlewares.append(create_tool_logging_middleware())
+        middlewares.append(ToolLoggingMiddleware())
 
         # 可选能力：长期记忆。只有 API 的 optional_features.long_term_memory_enabled 为 true 时才装配。
         if current_features.enable_memory:
-            from app.server.agent.src.middlewares.memory_placeholder import create_memory_placeholder_middleware
+            middlewares.append(MemoryPlaceholderMiddleware())
 
-            middlewares.append(create_memory_placeholder_middleware())
+        # 检索上下文注入：默认始终装配。无检索内容时该中间件 no-op。
+        middlewares.append(InjectRetrievalContextMiddleware())
 
         return middlewares
 
@@ -52,16 +53,15 @@ class MiddlewareFactory:
             中间件名称列表。
         """
         current_features = features or AgentFeatureConfig()
-        names: list[str] = []
-
-        if current_features.enable_tool_error_handler:
-            names.append("ToolErrorHandlerMiddleware")
-        if current_features.enable_tool_args_injection:
-            names.append("ToolArgsInjectMiddleware")
-        if current_features.enable_tool_logging:
-            names.append("ToolLoggingMiddleware")
+        names: list[str] = [
+            "SingleToolCallMiddleware",
+            "ToolErrorHandlerMiddleware",
+            "ToolArgsInjectMiddleware",
+            "ToolLoggingMiddleware",
+        ]
         if current_features.enable_memory:
             names.append("MemoryPlaceholderMiddleware")
+        names.append("InjectRetrievalContextMiddleware")
 
         return names
 
@@ -77,7 +77,6 @@ class MiddlewareFactory:
         state_schema_names: list[str] = []
 
         for middleware in middlewares:
-            # LangChain middleware 可以通过 state_schema 扩展 create_agent 底层的 LangGraph state。
             state_schema = getattr(middleware, "state_schema", None)
             if state_schema is None:
                 continue

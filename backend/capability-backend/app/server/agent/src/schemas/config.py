@@ -10,9 +10,6 @@ class AgentFeatureConfig(BaseModel):
     API 层使用 AgentOptionalFeatures 描述业务能力，AgentService 再把它转换成内部装配配置。
     """
 
-    enable_tool_args_injection: bool = Field(default=True, description="是否启用工具参数自动注入")
-    enable_tool_logging: bool = Field(default=True, description="是否启用工具调用日志")
-    enable_tool_error_handler: bool = Field(default=True, description="是否启用工具异常处理")
     enable_memory: bool = Field(default=False, description="是否启用记忆相关中间件")
 
 

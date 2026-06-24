@@ -1,7 +1,10 @@
 from typing import Any
 
 import httpx
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
+from langgraph.prebuilt.tool_node import ToolRuntime
+from langgraph.types import Command
 from pydantic import BaseModel, Field, field_validator
 
 from app.server.agent.src.tools.job_tools.config import get_job_tool_config
@@ -101,24 +104,66 @@ async def _post_job_api(
     return data
 
 
+def _format_skill_results(keyword: str, data: dict[str, Any]) -> str:
+    """将技能查询结果格式化为检索上下文文本。
+
+    Args:
+        keyword: 查询关键字。
+        data: Job API 返回的 data 字典。
+
+    Returns:
+        格式化后的检索上下文文本。
+    """
+    items = data.get("items") or []
+    total = data.get("total", 0)
+    if not items:
+        return f"技能查询「{keyword}」：未找到匹配结果。"
+
+    lines = [f"技能查询「{keyword}」共 {total} 条结果（展示前 {len(items)} 条）："]
+    for idx, item in enumerate(items, start=1):
+        name = item.get("name", "未知")
+        skill_id = item.get("id") or item.get("skill_id", "-")
+        desc = item.get("description", "")
+        desc_text = desc[:200] if desc else "无描述"
+        lines.append(f"  {idx}. {name}（ID: {skill_id}）— {desc_text}")
+    return "\n".join(lines)
+
+
 @tool("search_job_skills", args_schema=SearchJobSkillsInput)
-async def search_job_skills(keyword: str, limit: int = 10) -> dict[str, Any]:
+async def search_job_skills(keyword: str, limit: int = 10, runtime: ToolRuntime | None = None) -> Command | dict:
     """
     查询平台已存在的岗位技能。创建技能前必须先调用此工具，
     如果结果中存在语义相同的技能，应直接引用返回的技能 ID。
 
+    检索结果通过 Command 写入 state.retrieval_context，
+    由 InjectRetrievalContextMiddleware 注入到下一轮 system prompt。
+
     Args:
         keyword: 需要查询的技能名称或关键字。
         limit: 最大返回数量。
+        runtime: LangGraph 工具运行时，用于获取 tool_call_id 和更新 state。
 
     Returns:
-        Job 技能查询接口返回的候选技能数据。
+        Command 对象（LangGraph 环境）或 dict（非 LangGraph 兜底）。
     """
-    return await _post_job_api(
+    data = await _post_job_api(
         path="/job/skills/search",
         payload={"keyword": keyword, "limit": limit},
         operation_name="查询岗位技能",
     )
+
+    context_str = _format_skill_results(keyword, data)
+
+    if runtime is not None:
+        tool_call_id = getattr(runtime, "tool_call_id", None)
+        return Command(update={
+            "messages": [ToolMessage(
+                content=f"技能查询完成，找到 {data.get('total', 0)} 条结果",
+                tool_call_id=tool_call_id,
+            )],
+            "retrieval_context": context_str,
+        })
+    return data
 
 
 @tool("create_job_skill", args_schema=CreateJobSkillInput)
