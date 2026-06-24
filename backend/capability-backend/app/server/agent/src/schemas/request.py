@@ -17,7 +17,6 @@ class AgentOptionalFeatures(BaseModel):
 
     long_term_memory_enabled: bool = Field(default=False, description="是否启用长期记忆能力")
     conversation_context_enabled: bool = Field(default=False, description="是否启用会话上下文增强")
-    checkpoint_enabled: bool = Field(default=False, description="是否启用 LangGraph checkpoint 状态持久化")
     deferred_tool_filter_enabled: bool = Field(default=False, description="是否启用延迟工具筛选能力")
 
 

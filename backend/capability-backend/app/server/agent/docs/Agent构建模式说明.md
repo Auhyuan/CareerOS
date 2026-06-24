@@ -31,7 +31,6 @@
   "optional_features": {
     "long_term_memory_enabled": false,
     "conversation_context_enabled": false,
-    "checkpoint_enabled": false,
     "deferred_tool_filter_enabled": false
   },
   "runtime_options": {
@@ -256,7 +255,7 @@ build_config = self.build_agent_assembly_config(request)
 使用哪段 system_prompt
 允许使用哪些工具
 启用哪些内部能力
-是否启用 checkpointer
+checkpointer 是平台默认基础能力，不再通过 optional_features 开关控制
 是否启用长期记忆
 是否启用延迟工具筛选
 ```
@@ -393,12 +392,11 @@ class CareerAgentState(AgentState, total=False):
 ```json
 {
   "optional_features": {
-    "checkpoint_enabled": true
   }
 }
 ```
 
-则会获取 PostgreSQL checkpointer：
+运行时会默认获取 PostgreSQL checkpointer：
 
 ```python
 checkpointer = await self.checkpoint_service.get_checkpointer()

@@ -196,7 +196,6 @@
     "optional_features": {
       "long_term_memory_enabled": false,
       "conversation_context_enabled": false,
-      "checkpoint_enabled": false,
       "deferred_tool_filter_enabled": false
     },
     "runtime_options": {

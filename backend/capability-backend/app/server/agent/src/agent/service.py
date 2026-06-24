@@ -73,7 +73,6 @@ class AgentService:
         features = AgentFeatureConfig(
             enable_memory=request.optional_features.long_term_memory_enabled,
             enable_deferred_tool_filter=request.optional_features.deferred_tool_filter_enabled,
-            enable_checkpointer=request.optional_features.checkpoint_enabled,
         )
 
         return AgentBuildConfig(
@@ -99,12 +98,11 @@ class AgentService:
         """
         assembly_started_at = time.perf_counter()
         logger.info(
-            "Agent assembly started: thread_id=%s model_alias=%s tools=%s structured_output=%s checkpoint=%s",
+            "Agent assembly started: thread_id=%s model_alias=%s tools=%s structured_output=%s",
             context.thread_id,
             request.runtime_options.model or self.model_service.config.default_chat_alias,
             request.tools,
             request.response_format is not None,
-            request.optional_features.checkpoint_enabled,
         )
 
         # 第一步：生成本次装配配置。
@@ -160,11 +158,10 @@ class AgentService:
             max_retries=request.runtime_options.max_retries,
         )
 
-        # 第七步：按需获取 LangGraph checkpointer。
-        # Checkpointer 保存的是 LangGraph 图状态，不替代 ContextService 的历史消息表。
-        checkpointer = None
-        if build_config.features.enable_checkpointer:
-            checkpointer = await self.checkpoint_service.get_checkpointer()
+        # 第七步：获取 LangGraph checkpointer。
+        # Checkpointer 是平台基础设施能力，每次 Agent run 都默认启用。
+        # 它保存的是本轮 LangGraph 图状态，不替代 ContextService 的历史消息表。
+        checkpointer = await self.checkpoint_service.get_checkpointer()
         logger.info(
             "Agent checkpointer prepared: thread_id=%s enabled=%s",
             context.thread_id,
