@@ -184,12 +184,18 @@ class AgentService:
                 config={"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50},
                 context=context.to_langchain_context(),
             )
-        except Exception:
+        except Exception as error:
             logger.exception(
                 "Agent execution failed: thread_id=%s elapsed_ms=%.2f",
                 context.thread_id,
                 (time.perf_counter() - run_started_at) * 1000,
             )
+            if context_enabled:
+                self.context_service.add_error(
+                    db,
+                    conversation_id=context.thread_id,
+                    error_message=f"模型服务出错：{error}",
+                )
             raise
 
         # 第四步：提取最终回答。
@@ -308,6 +314,12 @@ class AgentService:
                 context.thread_id,
                 (time.perf_counter() - run_started_at) * 1000,
             )
+            if context_enabled:
+                self.context_service.add_error(
+                    db,
+                    conversation_id=context.thread_id,
+                    error_message=f"模型服务出错：{error}",
+                )
             yield {
                 "type": "error",
                 "data": {

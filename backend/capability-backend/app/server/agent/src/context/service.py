@@ -364,23 +364,3 @@ class AgentContextService:
             items=items,
         )
 
-    def to_langchain_messages(self, messages: list[ContextMessageView]) -> list[dict]:
-        """
-        将历史消息转换为 LangChain messages 输入格式。
-
-        Args:
-            messages: ContextService 返回的历史消息。
-
-        Returns:
-            可放入 agent.ainvoke({"messages": ...}) 的消息列表。
-        """
-        langchain_messages: list[dict] = []
-        for message in messages:
-            # 这里只把用户消息和助手最终回复拼回上下文。
-            # 工具调用、工具结果、事件日志属于审计数据，先不直接塞回模型，避免污染下一轮对话。
-            if message.message_type not in {"user_message", "assistant_message"}:
-                continue
-            if not message.content:
-                continue
-            langchain_messages.append({"role": message.role, "content": message.content})
-        return langchain_messages

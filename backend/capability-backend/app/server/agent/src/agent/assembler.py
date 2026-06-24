@@ -81,7 +81,6 @@ class AgentAssembler:
         # 第一步：从请求中直接构建内部装配配置（不再通过中间方法包装）。
         features = AgentFeatureConfig(
             enable_memory=request.optional_features.long_term_memory_enabled,
-            enable_deferred_tool_filter=request.optional_features.deferred_tool_filter_enabled,
         )
         build_config = AgentBuildConfig(
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
@@ -90,10 +89,9 @@ class AgentAssembler:
             features=features,
         )
         logger.info(
-            "Agent build config ready: thread_id=%s memory=%s deferred_tool_filter=%s",
+            "Agent build config ready: thread_id=%s memory=%s",
             context.thread_id,
             features.enable_memory,
-            features.enable_deferred_tool_filter,
         )
 
         # 第二步：渲染系统提示词。

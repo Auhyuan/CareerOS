@@ -16,7 +16,6 @@ class AgentOptionalFeatures(BaseModel):
     """本次 Agent 运行可选择开启的增强能力。"""
 
     long_term_memory_enabled: bool = Field(default=False, description="是否启用长期记忆能力")
-    deferred_tool_filter_enabled: bool = Field(default=False, description="是否启用延迟工具筛选能力")
 
 
 class AgentRunRequest(BaseModel):

@@ -14,7 +14,6 @@ class AgentFeatureConfig(BaseModel):
     enable_tool_logging: bool = Field(default=True, description="是否启用工具调用日志")
     enable_tool_error_handler: bool = Field(default=True, description="是否启用工具异常处理")
     enable_memory: bool = Field(default=False, description="是否启用记忆相关中间件")
-    enable_deferred_tool_filter: bool = Field(default=False, description="是否启用延迟工具筛选")
 
 
 class AgentBuildConfig(BaseModel):

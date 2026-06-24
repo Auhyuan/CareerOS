@@ -30,8 +30,7 @@
   "files": [],
   "tools": [],
   "optional_features": {
-    "long_term_memory_enabled": false,
-    "deferred_tool_filter_enabled": false
+    "long_term_memory_enabled": false
   },
   "runtime_options": {
     "model": "chat_main",
