@@ -13,6 +13,7 @@ def create_agent_context_schema() -> type[BaseModel]:
         "DynamicAgentRuntimeContext",
         __base__=BaseModel,
         thread_id=(str, Field(default="", description="会话线程 ID")),
+        run_id=(str, Field(default="", description="本次 Agent 调用 ID")),
         query=(str, Field(default="", description="本次运行任务")),
         sys_var=(dict[str, Any], Field(default_factory=dict, description="系统变量")),
         user_var=(dict[str, Any], Field(default_factory=dict, description="用户变量")),
@@ -21,4 +22,6 @@ def create_agent_context_schema() -> type[BaseModel]:
         allowed_tools=(list[str], Field(default_factory=list, description="允许调用的工具")),
         optional_features=(dict[str, Any], Field(default_factory=dict, description="本次运行开启的增强能力")),
         memory_enabled=(bool, Field(default=False, description="是否启用长期记忆")),
+        stateless=(bool, Field(default=False, description="是否以无状态模式运行")),
+        a2a_sub_agent_list=(list[str], Field(default_factory=list, description="本次 A2A 允许调用的子 Agent ID 列表")),
     )

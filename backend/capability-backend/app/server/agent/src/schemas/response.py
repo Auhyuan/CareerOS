@@ -32,5 +32,6 @@ class AgentCapabilityResponse(BaseModel):
 class AgentRunResponse(BaseModel):
     """通用 Agent 运行响应模型。"""
 
+    run_id: str = Field(default="", description="Agent 本次运行 ID")
     answer: str = Field(default="", description="Agent 输出文本")
     structured_output: dict[str, Any] | None = Field(default=None, description="结构化输出结果")

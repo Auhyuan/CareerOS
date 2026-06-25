@@ -104,6 +104,28 @@ async def _post_job_api(
     return data
 
 
+def _get_runtime_value(runtime: ToolRuntime | None, key: str, default: str = "") -> str:
+    """从 LangGraph ToolRuntime 的 context 中读取运行时变量。
+
+    Args:
+        runtime: LangGraph 注入的工具运行时对象。
+        key: 需要读取的运行时变量名。
+        default: 变量不存在时返回的默认值。
+
+    Returns:
+        运行时变量字符串；不存在时返回 default。
+    """
+    if runtime is None:
+        return default
+
+    context = getattr(runtime, "context", None)
+    if context is None:
+        return default
+    if isinstance(context, dict):
+        return str(context.get(key) or default)
+    return str(getattr(context, key, default) or default)
+
+
 def _format_skill_results(keyword: str, data: dict[str, Any]) -> str:
     """将技能查询结果格式化为检索上下文文本。
 
@@ -135,7 +157,7 @@ async def search_job_skills(keyword: str, limit: int = 10, runtime: ToolRuntime 
     查询平台已存在的岗位技能。创建技能前必须先调用此工具，
     如果结果中存在语义相同的技能，应直接引用返回的技能 ID。
 
-    检索结果通过 Command 写入 state.retrieval_context，
+    检索结果通过 Command 追加写入 state.retrieval_context，
     由 InjectRetrievalContextMiddleware 注入到下一轮 system prompt。
 
     Args:
@@ -161,7 +183,8 @@ async def search_job_skills(keyword: str, limit: int = 10, runtime: ToolRuntime 
                 content=f"技能查询完成，找到 {data.get('total', 0)} 条结果",
                 tool_call_id=tool_call_id,
             )],
-            "retrieval_context": context_str,
+            # 检索内容只对当前 run 生效；中间件会按 run_id 过滤后再注入 system prompt。
+            "retrieval_context": [{"run_id": _get_runtime_value(runtime, "run_id"), "content": context_str}],
         })
     return data
 

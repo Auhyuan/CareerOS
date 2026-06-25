@@ -146,14 +146,22 @@ class AgentAssembler:
         )
 
         # 第七步：获取 LangGraph checkpointer。
-        # Checkpointer 是平台基础设施能力，每次 Agent run 都默认启用。
-        # 它保存的是本轮 LangGraph 图状态，不替代 ContextService 的历史消息表。
-        checkpointer = await self.checkpoint_service.get_checkpointer()
-        logger.info(
-            "Agent checkpointer prepared: thread_id=%s enabled=%s",
-            context.thread_id,
-            checkpointer is not None,
-        )
+        # 普通 Agent 默认使用 PostgreSQL checkpointer，保留模型可见会话状态。
+        # A2A 子 Agent 会以 stateless=True 运行，此时不挂 checkpointer，避免子任务状态落入 checkpoint 表。
+        if request.runtime_options.stateless:
+            checkpointer = None
+            logger.info(
+                "Agent checkpointer skipped: thread_id=%s stateless=%s",
+                context.thread_id,
+                request.runtime_options.stateless,
+            )
+        else:
+            checkpointer = await self.checkpoint_service.get_checkpointer()
+            logger.info(
+                "Agent checkpointer prepared: thread_id=%s enabled=%s",
+                context.thread_id,
+                checkpointer is not None,
+            )
 
         # 第八步：真正创建 LangChain Agent。
         agent = create_agent(
@@ -186,6 +194,7 @@ class AgentAssembler:
                 "context_schema": context_schema.__name__,
                 "state_schemas": state_schema_names,
                 "checkpointer_enabled": checkpointer is not None,
+                "stateless": request.runtime_options.stateless,
                 "structured_output_enabled": build_config.response_format is not None,
             },
         )

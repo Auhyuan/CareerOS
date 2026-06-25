@@ -10,6 +10,7 @@ class ModelRuntimeOptions(BaseModel):
     temperature: float = Field(default=0.2, ge=0, le=2, description="模型采样温度")
     timeout_seconds: int | None = Field(default=None, ge=1, description="模型调用超时时间；为空时使用模型网关配置")
     max_retries: int = Field(default=2, ge=0, description="模型调用最大重试次数")
+    stateless: bool = Field(default=False, description="是否以无状态模式运行；主要用于 A2A 子 Agent 内部调用，开启后不挂 PostgreSQL checkpointer")
 
 
 class AgentOptionalFeatures(BaseModel):

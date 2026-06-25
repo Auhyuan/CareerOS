@@ -11,6 +11,7 @@ class AgentRuntimeContext(BaseModel):
     """
 
     thread_id: str = Field(default="", description="会话线程 ID，优先来自 conversation_id")
+    run_id: str = Field(default="", description="本次 Agent 调用 ID，用于隔离单次运行中的临时 state")
     query: str = Field(default="", description="本次运行的用户问题或任务指令")
     sys_var: dict[str, Any] = Field(default_factory=dict, description="系统变量，例如 thread_id")
     user_var: dict[str, Any] = Field(default_factory=dict, description="用户变量或编排层输入变量")
@@ -19,6 +20,7 @@ class AgentRuntimeContext(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list, description="本次运行允许调用的工具")
     optional_features: dict[str, Any] = Field(default_factory=dict, description="本次运行开启的增强能力")
     memory_enabled: bool = Field(default=False, description="本次运行是否启用长期记忆")
+    stateless: bool = Field(default=False, description="是否以无状态模式运行；为 true 时不使用 PostgreSQL checkpointer")
     a2a_sub_agent_list: list[str] = Field(default_factory=list, description="本次 A2A 可调用的子 Agent ID 列表")
 
     def to_langchain_context(self) -> dict[str, Any]:

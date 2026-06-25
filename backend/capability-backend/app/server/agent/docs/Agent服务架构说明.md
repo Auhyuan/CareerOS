@@ -63,6 +63,15 @@ GET  /agent/health
 GET  /agent/model/config
 GET  /agent/capabilities
 POST /agent/run
+POST /agent/conversations/search
+POST /agent/conversations/messages
+POST /agent/runs/search
+POST /agent/runs/detail
+POST /agent/runs/chain
+POST /agent/templates/upsert
+POST /agent/templates/detail
+POST /agent/templates/search
+```
 
 流式模式：
 
@@ -73,13 +82,6 @@ POST /agent/run
 ```
 
 SSE 事件由 `AgentService.stream()` 产出，API 层只负责序列化为 `event/data` 格式。
-POST /agent/conversations/search
-POST /agent/conversations/messages
-POST /agent/templates/upsert
-POST /agent/templates/detail
-POST /agent/templates/search
-```
-
 ### agent_api.py
 
 负责 Agent 运行相关接口。

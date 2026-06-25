@@ -471,9 +471,9 @@ context:
 
 ```text
 工具检索到资料
-  -> Command(update={"retrieval_context": "..."})
+  -> Command(update={"retrieval_context": [{"run_id": "...", "content": "..."}]})
   -> ToolMessage("工具调用完成")
-  -> middleware 下一轮读取 retrieval_context
+  -> middleware 下一轮按 run_id 读取当前运行的 retrieval_context
   -> 注入 system prompt
   -> 模型基于资料回答
 ```

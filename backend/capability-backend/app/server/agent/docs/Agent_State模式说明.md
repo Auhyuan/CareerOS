@@ -117,7 +117,7 @@ return Command(
         "messages": [
             ToolMessage(content="知识库检索完成", tool_call_id=runtime.tool_call_id)
         ],
-        "retrieval_context": retrieval_context,
+        "retrieval_context": [{"run_id": current_run_id, "content": retrieval_context}],
         "reference_map": reference_map,
     }
 )
@@ -126,7 +126,7 @@ return Command(
 中间件在模型调用前读取 state：
 
 ```python
-retrieval_context = request.state.get("retrieval_context", "")
+retrieval_context = request.state.get("retrieval_context", [])
 
 if retrieval_context:
     final_system_prompt = f"""
