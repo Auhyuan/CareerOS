@@ -19,6 +19,7 @@ class AgentRuntimeContext(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list, description="本次运行允许调用的工具")
     optional_features: dict[str, Any] = Field(default_factory=dict, description="本次运行开启的增强能力")
     memory_enabled: bool = Field(default=False, description="本次运行是否启用长期记忆")
+    a2a_sub_agent_list: list[str] = Field(default_factory=list, description="本次 A2A 可调用的子 Agent ID 列表")
 
     def to_langchain_context(self) -> dict[str, Any]:
         """转换为 LangChain Agent runtime context。

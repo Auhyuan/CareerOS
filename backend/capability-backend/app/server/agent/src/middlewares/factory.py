@@ -1,3 +1,4 @@
+from app.server.agent.src.middlewares.a2a_context_middleware import A2AAgentContextMiddleware
 from app.server.agent.src.middlewares.memory_placeholder_middleware import MemoryPlaceholderMiddleware
 from app.server.agent.src.middlewares.retrieval_context_middleware import InjectRetrievalContextMiddleware
 from app.server.agent.src.middlewares.single_tool_call_middleware import SingleToolCallMiddleware
@@ -41,6 +42,9 @@ class MiddlewareFactory:
         # 检索上下文注入：默认始终装配。无检索内容时该中间件 no-op。
         middlewares.append(InjectRetrievalContextMiddleware())
 
+        # A2A 上下文注入：默认始终装配。无 sub_agent_list 时该中间件 no-op。
+        middlewares.append(A2AAgentContextMiddleware())
+
         return middlewares
 
     def describe_middlewares(self, features: AgentFeatureConfig | None = None) -> list[str]:
@@ -62,6 +66,7 @@ class MiddlewareFactory:
         if current_features.enable_memory:
             names.append("MemoryPlaceholderMiddleware")
         names.append("InjectRetrievalContextMiddleware")
+        names.append("A2AAgentContextMiddleware")
 
         return names
 

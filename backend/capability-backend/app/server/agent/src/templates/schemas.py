@@ -21,6 +21,7 @@ class AgentTemplateConfig(BaseModel):
         default_factory=AgentOptionalFeatures,
         description="Agent 默认可选能力配置",
     )
+    is_sub_agent: bool = Field(default=False, description="是否可被其他 Agent 通过 A2A 调用")
     runtime_options: ModelRuntimeOptions = Field(
         default_factory=ModelRuntimeOptions,
         description="Agent 默认模型运行参数",

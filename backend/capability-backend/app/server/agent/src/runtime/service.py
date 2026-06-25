@@ -20,6 +20,8 @@ class AgentRuntimeContextService:
         thread_id = request.conversation_id or uuid4().hex
         optional_features = request.optional_features.model_dump()
 
+        a2a_sub_agent_list = request.a2a.sub_agent_list if request.a2a else []
+
         return AgentRuntimeContext(
             thread_id=thread_id,
             query=request.query,
@@ -30,6 +32,7 @@ class AgentRuntimeContextService:
             allowed_tools=request.tools,
             optional_features=optional_features,
             memory_enabled=request.optional_features.long_term_memory_enabled,
+            a2a_sub_agent_list=a2a_sub_agent_list,
         )
 
     def get_context_schema(self):

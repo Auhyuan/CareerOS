@@ -86,6 +86,7 @@ class AgentAssembler:
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
             response_format=request.response_format,
             tool_names=request.tools,
+            a2a=request.a2a,
             features=features,
         )
         logger.info(
@@ -115,6 +116,12 @@ class AgentAssembler:
             len(tools),
             [getattr(tool, "name", tool.__class__.__name__) for tool in tools],
         )
+
+        # 第三步附加：A2A 工具动态注入。仅 a2a.sub_agent_list 非空时装配 a2a_call 工具。
+        # 子 Agent 元信息查询和 system prompt 注入由 A2AAgentContextMiddleware 负责。
+        if build_config.a2a and build_config.a2a.sub_agent_list:
+            from app.server.agent.src.tools.a2a_tool import a2a_call
+            tools.append(a2a_call)
 
         # 第四步：构建 LangChain runtime context schema。
         context_schema = self.runtime_context_service.get_context_schema()
@@ -182,3 +189,4 @@ class AgentAssembler:
                 "structured_output_enabled": build_config.response_format is not None,
             },
         )
+

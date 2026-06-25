@@ -18,6 +18,15 @@ class AgentOptionalFeatures(BaseModel):
     long_term_memory_enabled: bool = Field(default=False, description="是否启用长期记忆能力")
 
 
+class AgentA2AConfig(BaseModel):
+    """A2A 调用配置。"""
+
+    sub_agent_list: list[str] = Field(
+        default_factory=list,
+        description="可调用的子 Agent ID 列表；为空时该 Agent 不具备 A2A 能力",
+    )
+
+
 class AgentRunRequest(BaseModel):
     """通用 Agent 真实运行请求模型。
 
@@ -37,6 +46,7 @@ class AgentRunRequest(BaseModel):
     files: list[dict[str, Any]] = Field(default_factory=list, description="附件上下文")
     tools: list[str] = Field(default_factory=list, description="本次运行允许使用的工具名称")
     optional_features: AgentOptionalFeatures = Field(default_factory=AgentOptionalFeatures, description="本次运行可选择开启的增强能力")
+    a2a: AgentA2AConfig | None = Field(default=None, description="A2A 调用配置；为空时不启用 A2A")
     runtime_options: ModelRuntimeOptions = Field(default_factory=ModelRuntimeOptions, description="模型运行参数")
 
     @field_validator("response_format")
