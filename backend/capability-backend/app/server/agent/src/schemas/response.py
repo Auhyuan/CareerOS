@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.server.agent.src.tools.schemas import AgentToolInfo
+
 
 class ModelConfigResponse(BaseModel):
     """脱敏后的模型配置响应。"""
@@ -27,6 +29,7 @@ class AgentCapabilityResponse(BaseModel):
     modules: list[str] = Field(default_factory=list, description="Agent 服务内部模块")
     enabled_features: list[str] = Field(default_factory=list, description="当前已规划或可用的能力")
     registered_tools: list[str] = Field(default_factory=list, description="当前已注册的 Agent 工具名称")
+    tools: list[AgentToolInfo] = Field(default_factory=list, description="当前可展示的 Agent 工具详情")
 
 
 class AgentRunResponse(BaseModel):

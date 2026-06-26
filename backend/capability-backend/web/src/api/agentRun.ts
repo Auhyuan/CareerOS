@@ -67,18 +67,14 @@ export interface AgentRunRequestPayload {
   tools?: string[]
   optional_features?: {
     long_term_memory_enabled?: boolean
-    a2a_enabled?: boolean
-    knowledge_retrieval_enabled?: boolean
-    tool_logging_enabled?: boolean
   }
-  a2a?: Record<string, unknown>
+  a2a?: { sub_agent_list?: string[] } | null
   runtime_options?: {
     model?: string | null
     temperature?: number
     max_tokens?: number
     timeout_seconds?: number
     max_retries?: number
-    stateless?: boolean
   }
 }
 
@@ -110,6 +106,30 @@ export interface AgentStreamEvent {
  * 后端返回 text/event-stream 格式，event 行 + data 行
  * 事件类型：message / start / end / error 等
  */
+/** 解析单个 SSE 事件块，并把 data JSON 转成前端统一事件对象。 */
+function emitSseBlock(block: string, onEvent: (event: AgentStreamEvent) => void) {
+  let eventType = 'message'
+  const dataLines: string[] = []
+
+  for (const raw of block.split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    if (line.startsWith('event:')) {
+      eventType = line.slice(6).trim() || 'message'
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trim())
+    }
+  }
+
+  const data = dataLines.join('\n')
+  if (!data) return
+  try {
+    const json = JSON.parse(data) as AgentStreamEvent
+    onEvent({ ...json, type: json.type || eventType })
+  } catch {
+    onEvent({ type: eventType, content: data })
+  }
+}
+
 export async function runAgentStream(
   payload: AgentRunRequestPayload,
   onEvent: (event: AgentStreamEvent) => void,
@@ -129,34 +149,21 @@ export async function runAgentStream(
     const reader = response.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
-    // 持续读取 SSE 流，按 event/data 解析
+    // 持续读取 SSE 流，按空行分隔的事件块解析；这样 event/data 被网络拆包时也不会丢事件名。
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      let currentEvent = 'message'
-      for (const raw of lines) {
-        const line = raw.replace(/\r$/, '')
-        if (!line) {
-          currentEvent = 'message'
-          continue
-        }
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim() || 'message'
-        } else if (line.startsWith('data:')) {
-          const data = line.slice(5).trim()
-          if (!data) continue
-          try {
-            const json = JSON.parse(data)
-            onEvent({ ...(json as object), type: (json as AgentStreamEvent).type || currentEvent })
-          } catch {
-            onEvent({ type: currentEvent, content: data })
-          }
-        }
+      const normalizedBuffer = buffer.replace(/\r\n/g, '\n')
+      const blocks = normalizedBuffer.split('\n\n')
+      buffer = blocks.pop() || ''
+      for (const block of blocks) {
+        emitSseBlock(block, onEvent)
       }
     }
+    // 兜底处理最后一个没有以空行结束的 SSE 事件块。
+    const tail = buffer.trim()
+    if (tail) emitSseBlock(tail, onEvent)
     onDone?.()
   } catch (err) {
     onError?.(err as Error)

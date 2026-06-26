@@ -4,6 +4,16 @@
  */
 import { httpGet } from './http'
 
+/** Agent 工具详情 */
+export interface AgentToolInfo {
+  name: string
+  description: string
+  group: string
+  invokable: boolean
+  invoke_note?: string | null
+  args_schema: Record<string, any>
+}
+
 /** Agent 服务能力响应（/agent/capabilities） */
 export interface AgentCapabilityResponse {
   service_name: string
@@ -11,6 +21,8 @@ export interface AgentCapabilityResponse {
   enabled_features: string[]
   /** 后端 list_tools() 返回的是字符串数组，不是对象 */
   registered_tools: string[]
+  /** 后端返回的工具详情，包含参数 Schema 和动态工具说明 */
+  tools?: AgentToolInfo[]
 }
 
 /** 获取 Agent 服务能力清单 */

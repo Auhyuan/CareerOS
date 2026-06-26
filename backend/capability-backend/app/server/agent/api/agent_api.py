@@ -91,6 +91,7 @@ def get_agent_capabilities():
                 "job_skill_http_tools",
             ],
             registered_tools=agent_service.tool_service.list_tools(),
+            tools=agent_service.tool_service.list_tool_details(),
         )
     )
 

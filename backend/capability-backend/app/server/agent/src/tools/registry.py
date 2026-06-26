@@ -55,6 +55,14 @@ class AgentToolRegistry:
         """
         return [tool.callable_ref for tool in self._tools.values() if tool.callable_ref is not None]
 
+    def list_definitions(self) -> list[AgentToolDefinition]:
+        """
+        获取全部工具定义。
+
+        Returns:
+            已注册工具定义列表。
+        """
+        return list(self._tools.values())
     def list_tools(self) -> list[str]:
         """
         获取全部已注册工具名称。

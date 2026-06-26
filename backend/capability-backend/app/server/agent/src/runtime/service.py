@@ -43,14 +43,13 @@ class AgentRuntimeContextService:
             thread_id=thread_id,
             run_id=run_id,
             query=request.query,
-            sys_var={"thread_id": thread_id, "run_id": run_id, "stateless": request.runtime_options.stateless},
+            sys_var={"thread_id": thread_id, "run_id": run_id},
             user_var=request.inputs,
             inputs=request.inputs,
             files=request.files,
             allowed_tools=request.tools,
             optional_features=optional_features,
             memory_enabled=request.optional_features.long_term_memory_enabled,
-            stateless=request.runtime_options.stateless,
             a2a_sub_agent_list=a2a_sub_agent_list,
         )
 

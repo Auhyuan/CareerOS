@@ -146,14 +146,14 @@ class AgentService:
             )
         logger.info(
             "Agent run started: run_id=%s thread_id=%s query_length=%d persistent_conversation=%s "
-            "structured_output=%s stream=%s stateless=%s",
+            "structured_output=%s stream=%s conversation_id_present=%s",
             context.run_id,
             context.thread_id,
             len(request.query),
             request.conversation_id is not None,
             request.response_format is not None,
             request.stream,
-            request.runtime_options.stateless,
+            request.conversation_id is not None,
         )
 
         return context, context_enabled, run_record_enabled

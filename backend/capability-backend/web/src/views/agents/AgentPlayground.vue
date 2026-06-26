@@ -23,17 +23,12 @@
                 {{ t }}
               </a-tag>
             </a-descriptions-item>
-            <a-descriptions-item label="可被 A2A">
-              <a-tag :color="agentDetail.config?.is_sub_agent ? 'blue' : 'default'">
-                {{ agentDetail.config?.is_sub_agent ? '是' : '否' }}
-              </a-tag>
-            </a-descriptions-item>
             <a-descriptions-item label="可被 A2A 调用">
               <a-tag :color="agentDetail.config?.is_sub_agent ? 'green' : 'default'">
                 {{ agentDetail.config?.is_sub_agent ? '是' : '否' }}
               </a-tag>
             </a-descriptions-item>
-            <a-descriptions-item v-if="agentDetail.config?.optional_features?.a2a_enabled" label="A2A 能力">
+            <a-descriptions-item v-if="agentDetail.config?.a2a?.sub_agent_list?.length" label="A2A 能力">
               <a-tag color="blue">已开启</a-tag>
             </a-descriptions-item>
           </a-descriptions>
@@ -192,13 +187,14 @@ async function onRun() {
     query: userText,
     conversation_id: conversationId.value,
     system_prompt: tplCfg.system_prompt || undefined,
+    response_format: tplCfg.response_format || undefined,
     tools: overrideTools.value.length
       ? overrideTools.value
       : tplCfg.tools || undefined,
     optional_features: {
       long_term_memory_enabled: memoryEnabled.value,
-      a2a_enabled: a2aEnabled.value,
     },
+    a2a: a2aEnabled.value ? tplCfg.a2a || undefined : undefined,
     runtime_options: tplCfg.runtime_options || undefined,
   }
 
@@ -211,11 +207,10 @@ async function onRun() {
       await runAgentStream(
         payload,
         (event) => {
-          const delta = (event.delta as string) || (event.content as string) || ''
-          if (delta) {
+          handleStreamEvent(event, idx, (delta) => {
             answer += delta
             messages.value[idx] = { ...messages.value[idx], content: answer }
-          }
+          })
         },
         (err) => {
           message.error('流式调用失败：' + err.message)
@@ -234,6 +229,77 @@ async function onRun() {
   } catch (e) {
     running.value = false
     message.error('调用失败')
+  }
+}
+
+/** 处理后端 SSE 事件，并把模型增量、工具事件和最终结果同步到消息流。 */
+function handleStreamEvent(event: Record<string, any>, assistantIndex: number, appendDelta: (delta: string) => void) {
+  const data = (event.data || {}) as Record<string, any>
+
+  // 后端模型增量放在 data.content；这里兼容旧字段 delta/content，避免未来协议小调整导致空白。
+  if (event.type === 'model_delta' || event.type === 'reasoning_delta') {
+    const delta = String(data.content || event.delta || event.content || '')
+    if (delta) appendDelta(delta)
+    return
+  }
+
+  // 工具开始和工具结果单独展示，方便试跑时确认 Agent 是否真的调用了工具。
+  if (event.type === 'tool_call_start') {
+    messages.value.push({
+      role: 'tool',
+      tool_name: String(data.tool_name || 'tool'),
+      content: `调用工具：${data.tool_name || 'tool'}\n参数：${safeJson(data.input)}`,
+      time: now(),
+    })
+    return
+  }
+
+  if (event.type === 'tool_call_result') {
+    messages.value.push({
+      role: 'tool',
+      tool_name: String(data.tool_name || 'tool'),
+      content: `工具返回：${safeJson(data.output)}`,
+      time: now(),
+    })
+    return
+  }
+
+  // final 事件是后端最终答案兜底；部分模型或结构化输出场景可能没有稳定 token 增量。
+  if (event.type === 'final') {
+    const finalAnswer = String(data.answer || event.answer || '')
+    const structured = data.structured_output as Record<string, unknown> | undefined
+    if (finalAnswer) {
+      messages.value[assistantIndex] = {
+        ...messages.value[assistantIndex],
+        content: finalAnswer,
+        structured,
+      }
+    } else if (structured) {
+      messages.value[assistantIndex] = {
+        ...messages.value[assistantIndex],
+        content: '已生成结构化输出',
+        structured,
+      }
+    }
+    return
+  }
+
+  if (event.type === 'error') {
+    messages.value[assistantIndex] = {
+      ...messages.value[assistantIndex],
+      content: `调用失败：${data.message || event.message || '未知错误'}`,
+    }
+  }
+}
+
+/** 安全格式化工具输入输出，避免复杂对象展示为 [object Object]。 */
+function safeJson(value: unknown) {
+  if (value === undefined || value === null || value === '') return '-'
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
   }
 }
 

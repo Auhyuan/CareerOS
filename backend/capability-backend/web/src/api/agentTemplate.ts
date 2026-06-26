@@ -12,15 +12,11 @@ export interface ModelRuntimeOptions {
   max_tokens?: number
   timeout_seconds?: number
   max_retries?: number
-  stateless?: boolean
 }
 
 /** 可选能力（AgentOptionalFeatures） */
 export interface AgentOptionalFeatures {
   long_term_memory_enabled?: boolean
-  a2a_enabled?: boolean
-  knowledge_retrieval_enabled?: boolean
-  tool_logging_enabled?: boolean
 }
 
 /** Agent 模板运行配置（AgentTemplateConfig） */
@@ -30,6 +26,7 @@ export interface AgentTemplateConfig {
   tools?: string[]
   optional_features?: AgentOptionalFeatures
   is_sub_agent?: boolean
+  a2a?: { sub_agent_list?: string[] } | null
   runtime_options?: ModelRuntimeOptions
   /** 模板 config 是 JSONB，后端 ConfigDict(extra='allow') 允许其他扩展字段 */
   [key: string]: unknown

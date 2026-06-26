@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.server.agent.src.schemas.request import AgentOptionalFeatures, ModelRuntimeOptions
+from app.server.agent.src.schemas.request import AgentA2AConfig, AgentOptionalFeatures, ModelRuntimeOptions
 
 
 class AgentTemplateConfig(BaseModel):
@@ -22,6 +22,10 @@ class AgentTemplateConfig(BaseModel):
         description="Agent 默认可选能力配置",
     )
     is_sub_agent: bool = Field(default=False, description="是否可被其他 Agent 通过 A2A 调用")
+    a2a: AgentA2AConfig | None = Field(
+        default=None,
+        description="模板默认 A2A 配置；sub_agent_list 非空时，运行时可动态装配 a2a_call 工具。",
+    )
     runtime_options: ModelRuntimeOptions = Field(
         default_factory=ModelRuntimeOptions,
         description="Agent 默认模型运行参数",

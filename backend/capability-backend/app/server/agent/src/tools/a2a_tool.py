@@ -83,7 +83,7 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime | None = None
     安全边界：
     1. agent_id 必须在本次运行允许的 a2a_sub_agent_list 中。
     2. 目标 Agent 模板必须声明 is_sub_agent=true。
-    3. 子 Agent 调用时使用独立 sub_thread_id，且 stateless=True，不落 LangGraph checkpoint。
+    3. 子 Agent 调用时不传 conversation_id，因此不落 LangGraph checkpoint。
     4. 子 Agent 调用时 long_term_memory_enabled=False，避免读写用户长期记忆。
     5. 子 Agent 调用时 a2a=None，避免第一版出现递归式 Agent 调 Agent。
 
@@ -113,7 +113,6 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime | None = None
     parent_conversation_id = str(runtime_context.get("thread_id") or "") or None
     parent_run_id = str(runtime_context.get("run_id") or "") or None
     sub_run_id = uuid4().hex
-    sub_thread_id = uuid4().hex
     sub_started_at = time.perf_counter()
 
     # 第二层校验：模板必须存在，并且明确声明自己可以作为子 Agent 被调用。
@@ -139,16 +138,16 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime | None = None
             metadata={"source": "a2a_call"},
         )
 
-    # 子 Agent 使用独立 sub_thread_id，但 stateless=True 会让 AgentAssembler 不挂 PostgreSQL checkpointer。
+    # 子 Agent 不传 conversation_id，因此 AgentAssembler 不会挂 PostgreSQL checkpointer。
     # db=None 表示不写 agent_conversations/agent_messages，也不额外创建主运行记录。
     sub_request = AgentRunRequest(
         query=query,
-        conversation_id=sub_thread_id,
+        conversation_id=None,
         system_prompt=config.system_prompt,
         response_format=config.response_format,
         tools=list(config.tools or []),
         optional_features=AgentOptionalFeatures(long_term_memory_enabled=False),
-        runtime_options=config.runtime_options.model_copy(update={"stateless": True}),
+        runtime_options=config.runtime_options,
         a2a=None,
     )
 
@@ -160,6 +159,6 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime | None = None
         return response.answer
     except Exception as error:
         elapsed_ms = (time.perf_counter() - sub_started_at) * 1000
-        logger.exception("A2A sub-agent call failed: agent_id=%s sub_run_id=%s sub_thread_id=%s", agent_id, sub_run_id, sub_thread_id)
+        logger.exception("A2A sub-agent call failed: agent_id=%s sub_run_id=%s", agent_id, sub_run_id)
         _mark_agent_run_failed(sub_run_id, str(error), elapsed_ms)
         return f"子 Agent 调用失败：{error}"
