@@ -151,8 +151,8 @@ function onTableChange(pag: { current?: number; pageSize?: number }) {
 
 /** 删除 */
 async function onDelete(agent_id: string) {
-  await deleteAgentTemplate(agent_id)
-  message.success('删除成功')
+  const deleted = await deleteAgentTemplate([agent_id])
+  message.success(`删除成功，共删除 ${deleted} 条`)
   loadList()
 }
 

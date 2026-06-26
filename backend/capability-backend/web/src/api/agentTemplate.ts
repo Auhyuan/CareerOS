@@ -64,7 +64,7 @@ export function upsertAgentTemplate(payload: {
   return httpPost<AgentTemplate>('/agent/templates/upsert', payload)
 }
 
-/** 删除模板 */
-export function deleteAgentTemplate(agent_id: string) {
-  return httpPost<{ success: boolean }>('/agent/templates/delete', { agent_id })
+/** 批量删除模板（与后端 /agent/templates/delete 接口对齐，请求体携带 ID 列表） */
+export function deleteAgentTemplate(agent_ids: string[]) {
+  return httpPost<number>('/agent/templates/delete', { agent_ids })
 }

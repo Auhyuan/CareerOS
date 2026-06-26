@@ -128,3 +128,28 @@ class AgentTemplateRepository:
         rows = list(db.exec(list_sql).all())
         total = db.exec(count_sql).one()
         return rows, int(total)
+
+    def delete_by_agent_ids(self, db: Session, agent_ids: list[str]) -> int:
+        """
+        根据 agent_id 列表批量删除 Agent 模板。
+
+        Args:
+            db: 数据库会话。
+            agent_ids: 待删除的 Agent 稳定业务 ID 列表。
+
+        Returns:
+            实际删除的记录数量。
+        """
+        if not agent_ids:
+            return 0
+        # 过滤掉空字符串，避免 SQL 出现 agent_id = '' 的无意义匹配。
+        normalized_ids = [agent_id for agent_id in agent_ids if agent_id]
+        if not normalized_ids:
+            return 0
+        existing = db.exec(
+            select(AgentTemplate).where(col(AgentTemplate.agent_id).in_(normalized_ids))
+        ).all()
+        for template in existing:
+            db.delete(template)
+        db.commit()
+        return len(existing)

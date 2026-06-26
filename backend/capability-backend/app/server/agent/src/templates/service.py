@@ -3,6 +3,7 @@ from sqlmodel import Session
 from app.server.agent.src.templates.models import AgentTemplate
 from app.server.agent.src.templates.repository import AgentTemplateRepository
 from app.server.agent.src.templates.schemas import (
+    AgentTemplateDeleteRequest,
     AgentTemplateSearchRequest,
     AgentTemplateSearchResponse,
     AgentTemplateUpsertRequest,
@@ -11,7 +12,7 @@ from app.server.agent.src.templates.schemas import (
 
 
 class AgentTemplateService:
-    """Agent 模板服务，负责模板的创建、更新和查询。"""
+    """Agent 模板服务，负责模板的创建、更新、查询和删除。"""
 
     def __init__(self, repository: AgentTemplateRepository | None = None):
         """
@@ -83,6 +84,19 @@ class AgentTemplateService:
             page_size=request.page_size,
             items=[self.to_view(row) for row in rows],
         )
+
+    def delete_templates(self, db: Session, request: AgentTemplateDeleteRequest) -> int:
+        """
+        批量删除 Agent 模板。
+
+        Args:
+            db: 数据库会话。
+            request: 批量删除参数，包含待删除的 agent_id 列表。
+
+        Returns:
+            实际删除的模板数量。
+        """
+        return self.repository.delete_by_agent_ids(db, request.agent_ids)
 
     def to_view(self, template: AgentTemplate) -> AgentTemplateView:
         """

@@ -90,3 +90,13 @@ class AgentTemplateSearchResponse(BaseModel):
     page: int = Field(default=1, description="页码")
     page_size: int = Field(default=20, description="每页数量")
     items: list[AgentTemplateView] = Field(default_factory=list, description="模板列表")
+
+
+class AgentTemplateDeleteRequest(BaseModel):
+    """批量删除 Agent 模板的请求参数。"""
+
+    agent_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        description="待删除的 Agent 稳定业务 ID 列表，至少包含一个",
+    )

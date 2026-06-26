@@ -5,6 +5,7 @@ from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
 from app.server.agent.src.templates import AgentTemplateService
 from app.server.agent.src.templates.schemas import (
+    AgentTemplateDeleteRequest,
     AgentTemplateDetailRequest,
     AgentTemplateSearchRequest,
     AgentTemplateSearchResponse,
@@ -72,3 +73,22 @@ def search_agent_templates(
     """
     result = template_service.search_templates(db, request)
     return Result.success(result)
+
+
+@router.post("/delete", response_model=Result[int], summary="批量删除 Agent 模板")
+def delete_agent_templates(
+    request: AgentTemplateDeleteRequest,
+    db: Session = Depends(get_postgres_engine),
+):
+    """
+    根据 agent_id 列表批量删除 Agent 模板。
+
+    Args:
+        request: 批量删除参数，包含待删除的 agent_id 列表。
+        db: PostgreSQL 数据库会话。
+
+    Returns:
+        统一响应结构，data 中包含实际删除的模板数量。
+    """
+    deleted = template_service.delete_templates(db, request)
+    return Result.success(deleted)
