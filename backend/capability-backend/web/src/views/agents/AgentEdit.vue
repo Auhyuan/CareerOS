@@ -59,12 +59,31 @@
           <a-select
             v-model:value="form.config.tools"
             mode="multiple"
-            placeholder="选择该 Agent 可调用的工具"
+            placeholder="选择该 Agent 可调用的常规工具"
             style="width: 100%"
             :options="toolOptions"
             show-search
             option-filter-prop="label"
           />
+        </a-form-item>
+      </a-card>
+
+      <!-- A2A 调度配置 -->
+      <a-card title="A2A 调度配置" class="mb-4">
+        <a-form-item label="可调用子 Agent">
+          <a-select
+            v-model:value="a2aSubAgentList"
+            mode="multiple"
+            placeholder="选择后，该 Agent 运行时会动态获得 a2a_call 工具"
+            style="width: 100%"
+            :options="subAgentOptions"
+            show-search
+            option-filter-prop="label"
+            allow-clear
+          />
+          <div class="text-gray-500 mt-1">
+            留空表示不启用 A2A。只有声明为“可被 A2A 调用”的 Agent 会出现在这里。
+          </div>
         </a-form-item>
       </a-card>
 
@@ -139,6 +158,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
   getAgentTemplateDetail,
+  searchAgentTemplates,
   type AgentTemplate,
   upsertAgentTemplate,
 } from '@/api/agentTemplate'
@@ -175,6 +195,7 @@ const form = reactive<AgentTemplate>({
     optional_features: {
       long_term_memory_enabled: false,
     },
+    a2a: null,
   },
 })
 
@@ -190,6 +211,8 @@ const rules = {
 // 下拉数据
 const toolOptions = ref<{ label: string; value: string }[]>([])
 const modelOptions = ref<{ label: string; value: string }[]>([])
+const subAgentOptions = ref<{ label: string; value: string }[]>([])
+const a2aSubAgentList = ref<string[]>([])
 
 /** 加载下拉数据 */
 async function loadOptions() {
@@ -204,6 +227,14 @@ async function loadOptions() {
     modelOptions.value = (mc.available_models || []).map((m) => ({ label: m, value: m }))
   } catch {
     modelOptions.value = []
+  }
+  try {
+    const templatePage = await searchAgentTemplates({ page: 1, page_size: 100, status: 'active' })
+    subAgentOptions.value = (templatePage.items || [])
+      .filter((item) => item.config?.is_sub_agent && item.agent_id !== form.agent_id)
+      .map((item) => ({ label: `${item.agent_name} (${item.agent_id})`, value: item.agent_id }))
+  } catch {
+    subAgentOptions.value = []
   }
 }
 
@@ -227,7 +258,9 @@ async function loadDetail() {
       ...form.config.optional_features,
       ...(detail.config?.optional_features || {}),
     },
+    a2a: detail.config?.a2a || null,
   }
+  a2aSubAgentList.value = detail.config?.a2a?.sub_agent_list || []
   // 同步 JSON 字符串
   if (detail.config?.response_format) {
     responseFormatText.value = JSON.stringify(detail.config.response_format, null, 2)
@@ -248,6 +281,10 @@ async function onSubmit() {
   } else {
     form.config.response_format = undefined
   }
+  form.config.a2a = a2aSubAgentList.value.length
+    ? { sub_agent_list: [...a2aSubAgentList.value] }
+    : null
+
   saving.value = true
   try {
     const res = await upsertAgentTemplate({
@@ -267,8 +304,8 @@ async function onSubmit() {
 }
 
 onMounted(async () => {
-  await loadOptions()
   await loadDetail()
+  await loadOptions()
 })
 </script>
 

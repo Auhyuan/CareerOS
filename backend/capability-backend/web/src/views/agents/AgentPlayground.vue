@@ -161,6 +161,10 @@ async function loadAll() {
   loading.value = true
   try {
     agentDetail.value = await getAgentTemplateDetail(agentId.value)
+    // 模板已配置 A2A 时自动开启
+    if (agentDetail.value?.config?.a2a?.sub_agent_list?.length) {
+      a2aEnabled.value = true
+    }
     const cap = await getCapabilities()
     // 后端 registered_tools 是 string[]
     toolOptions.value = (cap.registered_tools || []).map((name) => ({ label: name, value: name }))
