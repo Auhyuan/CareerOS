@@ -1,43 +1,43 @@
-# orchestration-backend
+﻿# orchestration-backend
 
-`orchestration-backend` 是就业指导 AI 平台的业务编排层，负责把能力层提供的 Agent、爬虫等能力组合成就业平台业务流程。
+`orchestration-backend` 鏄氨涓氭寚瀵?AI 骞冲彴鐨勪笟鍔＄紪鎺掑眰锛岃礋璐ｆ妸鑳藉姏灞傛彁渚涚殑 Agent銆佺埇铏瓑鑳藉姏缁勫悎鎴愬氨涓氬钩鍙颁笟鍔℃祦绋嬨€?
 
-## 职责边界
+## 鑱岃矗杈圭晫
 
-编排层可以读写岗位业务表，并通过 HTTP API 调用 `capability-backend`。
+缂栨帓灞傚彲浠ヨ鍐欏矖浣嶄笟鍔¤〃锛屽苟閫氳繃 HTTP API 璋冪敤 `AI-backend`銆?
 
-当前模块：
+褰撳墠妯″潡锛?
 
 ```text
-app/server/job/        # 岗位业务编排
-app/common/            # 通用配置、数据库、响应、异常处理
-sql/                   # 编排层数据库脚本
+app/server/job/        # 宀椾綅涓氬姟缂栨帓
+app/common/            # 閫氱敤閰嶇疆銆佹暟鎹簱銆佸搷搴斻€佸紓甯稿鐞?
+sql/                   # 缂栨帓灞傛暟鎹簱鑴氭湰
 ```
 
-## 主要接口
+## 涓昏鎺ュ彛
 
-岗位采集：
+宀椾綅閲囬泦锛?
 
 ```text
 GET  /job/health
 POST /job/crawl/qcwy/jobs
 ```
 
-原始岗位：
+鍘熷宀椾綅锛?
 
 ```text
 POST /job/raw-records/search
 GET  /job/raw-records/{raw_record_id}
 ```
 
-岗位方向：
+宀椾綅鏂瑰悜锛?
 
 ```text
 POST /job/directions/search
 GET  /job/directions/{direction_id}
 ```
 
-岗位画像：
+宀椾綅鐢诲儚锛?
 
 ```text
 GET  /job/profiles/{profile_id}
@@ -46,29 +46,29 @@ POST /job/skills/search
 POST /job/skills/create
 ```
 
-用户岗位画像生成请求：
+鐢ㄦ埛宀椾綅鐢诲儚鐢熸垚璇锋眰锛?
 
 ```json
 {
   "profile_type": "user",
   "agent_id": "job-profile-agent",
   "user_id": "10001",
-  "job_text": "用户提交的岗位相关文本",
+  "job_text": "鐢ㄦ埛鎻愪氦鐨勫矖浣嶇浉鍏虫枃鏈?,
   "use_system_job_data": false
 }
 ```
 
-`/job/profiles/generate` 是统一生成入口：
+`/job/profiles/generate` 鏄粺涓€鐢熸垚鍏ュ彛锛?
 
-- `profile_type=user`：执行用户岗位画像生成流程。
-- `profile_type=system`：系统画像路线预留，当前暂未开放。
+- `profile_type=user`锛氭墽琛岀敤鎴峰矖浣嶇敾鍍忕敓鎴愭祦绋嬨€?
+- `profile_type=system`锛氱郴缁熺敾鍍忚矾绾块鐣欙紝褰撳墠鏆傛湭寮€鏀俱€?
 
-用户画像流程会调用能力层 `/agent/run` 获取结构化画像，校验通过后写入
-`job_market_profiles`。
+鐢ㄦ埛鐢诲儚娴佺▼浼氳皟鐢ㄨ兘鍔涘眰 `/agent/run` 鑾峰彇缁撴瀯鍖栫敾鍍忥紝鏍￠獙閫氳繃鍚庡啓鍏?
+`job_market_profiles`銆?
 
-## 数据库
+## 鏁版嵁搴?
 
-编排层当前使用 `public` schema 的岗位业务表：
+缂栨帓灞傚綋鍓嶄娇鐢?`public` schema 鐨勫矖浣嶄笟鍔¤〃锛?
 
 ```text
 spider_crawl_runs
@@ -77,13 +77,13 @@ job_directions
 job_market_profiles
 ```
 
-SQL 脚本放在：
+SQL 鑴氭湰鏀惧湪锛?
 
 ```text
 backend/orchestration-backend/sql
 ```
 
-## 启动
+## 鍚姩
 
 ```powershell
 cd D:\study\get_job_data\backend\orchestration-backend
@@ -91,31 +91,32 @@ pip install -r requirements.txt
 python app/main.py
 ```
 
-默认地址：
+榛樿鍦板潃锛?
 
 ```text
 http://127.0.0.1:8091
 ```
 
-## 环境变量
+## 鐜鍙橀噺
 
-配置文件：
+閰嶇疆鏂囦欢锛?
 
 ```text
 .env
 .env.example
 ```
 
-常见配置：
+甯歌閰嶇疆锛?
 
 ```text
 FASTAPI_HOST
 FASTAPI_PORT
-CAPABILITY_BASE_URL
-CAPABILITY_TIMEOUT_SECONDS
+AI_BACKEND_BASE_URL
+AI_BACKEND_TIMEOUT_SECONDS
 POSTGRES_HOST
 POSTGRES_PORT
 POSTGRES_USER
 POSTGRES_PASSWORD
 POSTGRES_DATABASE
 ```
+

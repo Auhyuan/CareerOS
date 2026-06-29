@@ -13,7 +13,7 @@ SQLAlchemy==2.0.44
 sqlmodel==0.0.27
 psycopg2-binary==2.9.11
 
-# Capability service client
+# AI-backend service client
 httpx==0.28.1
 
 # Spider runtime

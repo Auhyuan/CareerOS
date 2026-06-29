@@ -1,3 +1,3 @@
-﻿from app.server.job.src.clients.capability_agent_client import CapabilityAgentClient
+from app.server.job.src.clients.ai_backend_agent_client import AIBackendAgentClient
 
-__all__ = ["CapabilityAgentClient"]
+__all__ = ["AIBackendAgentClient"]

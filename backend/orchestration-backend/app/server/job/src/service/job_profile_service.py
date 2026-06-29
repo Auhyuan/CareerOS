@@ -8,7 +8,7 @@ from sqlmodel import Session
 
 from app.common.core.exceptions import BusinessException
 from app.server.job.src.config.job_config import JOB_DEFAULT_PAGE, JOB_DEFAULT_PAGE_SIZE, JOB_MAX_PAGE_SIZE
-from app.server.job.src.clients import CapabilityAgentClient
+from app.server.job.src.clients import AIBackendAgentClient
 from app.server.job.src.models.job_model import JobMarketProfile
 from app.server.job.src.repository.job_repository import JobRepository
 from app.server.job.src.schemas.job_profile import (
@@ -28,16 +28,16 @@ class JobProfileService:
     def __init__(
         self,
         repository: JobRepository | None = None,
-        capability_agent_client: CapabilityAgentClient | None = None,
+        ai_backend_agent_client: AIBackendAgentClient | None = None,
     ):
         """
         初始化岗位画像服务。
         Args:
             repository: 岗位库数据访问对象。
-            capability_agent_client: 能力层通用 Agent 客户端。
+            ai_backend_agent_client: 能力层通用 Agent 客户端。
         """
         self.repository = repository or JobRepository()
-        self.capability_agent_client = capability_agent_client or CapabilityAgentClient()
+        self.ai_backend_agent_client = ai_backend_agent_client or AIBackendAgentClient()
 
     def generate_profile(
         self,
@@ -299,7 +299,7 @@ class JobProfileService:
             BusinessException: 模板查询失败、模板不存在、被禁用或配置不完整。
         """
         try:
-            template = self.capability_agent_client.get_agent_template(agent_id)
+            template = self.ai_backend_agent_client.get_agent_template(agent_id)
         except RuntimeError as error:
             raise BusinessException(code=502, msg=str(error)) from error
 
@@ -363,7 +363,7 @@ class JobProfileService:
         """
         original_output = agent_result.get("answer") or ""
         query = (
-            "请修复下面的岗位画像输出，使其严格符合 ???? JSON 定义的结构。"
+            "请修复下面的岗位画像输出，使其严格符合 约定的 JSON 定义的结构。"
             "只能根据原始岗位材料修复，不得补充新事实。\n\n"
             f"原始岗位材料：\n{cleaned_job_text}\n\n"
             f"待修复输出：\n{original_output}\n\n"
@@ -423,7 +423,7 @@ class JobProfileService:
             BusinessException: 能力层 Agent 调用失败。
         """
         try:
-            return self.capability_agent_client.run_agent(payload)
+            return self.ai_backend_agent_client.run_agent(payload)
         except RuntimeError as error:
             raise BusinessException(code=502, msg=str(error)) from error
 
@@ -438,7 +438,7 @@ class JobProfileService:
             ValueError: 响应中不存在可解析的 JSON。
             ValidationError: JSON 不符合岗位画像 Schema。
         """
-        # Agent no longer uses LangChain ???? JSON. The profile JSON is parsed from answer text.
+        # Agent 已不再使用 LangChain 结构化输出，这里直接从 answer 文本中解析岗位画像 JSON。
         answer = agent_result.get("answer")
         if not isinstance(answer, str) or not answer.strip():
             raise ValueError("Agent did not return job profile content")

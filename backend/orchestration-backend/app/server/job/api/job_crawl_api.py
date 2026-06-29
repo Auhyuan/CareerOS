@@ -20,7 +20,7 @@ def crawl_and_ingest_qcwy_jobs(
     """
     编排前程无忧岗位采集和入库。
 
-    该接口属于 orchestration-backend：它调用 capability-backend 的爬虫能力，然后负责写入岗位业务库。
+    该接口属于 orchestration-backend：它调用 AI-backend 的爬虫能力，然后负责写入岗位业务库。
 
     Args:
         request: 前程无忧岗位采集并入库请求。
