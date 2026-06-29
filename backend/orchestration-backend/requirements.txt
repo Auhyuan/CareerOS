@@ -1,10 +1,23 @@
-﻿fastapi==0.121.3
+# orchestration-backend runtime dependencies
+# Keep this file scoped to the orchestration service only.
+
+# Web API
+fastapi==0.121.3
 uvicorn==0.38.0
 python-dotenv==1.2.1
 pydantic==2.12.4
 pydantic-settings==2.12.0
+
+# Database
 SQLAlchemy==2.0.44
 sqlmodel==0.0.27
-psycopg==3.3.4
-psycopg-binary==3.3.4
+psycopg2-binary==2.9.11
+
+# Capability service client
 httpx==0.28.1
+
+# Spider runtime
+requests==2.32.5
+playwright==1.56.0
+pandas==2.3.3
+openpyxl==3.1.5
