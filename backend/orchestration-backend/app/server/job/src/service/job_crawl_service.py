@@ -1,11 +1,10 @@
-import hashlib
+﻿import hashlib
 import json
 from datetime import datetime
 from typing import Any
 
 from sqlmodel import Session
 
-from app.server.job.src.clients import CapabilitySpiderClient
 from app.server.job.src.config.job_config import (
     SPIDER_RUN_STATUS_FAILED,
     SPIDER_RUN_STATUS_RUNNING,
@@ -13,33 +12,40 @@ from app.server.job.src.config.job_config import (
 )
 from app.server.job.src.models.job_model import JobRawRecord, SpiderCrawlRun
 from app.server.job.src.repository.job_repository import JobRepository
+from app.server.spider.src.schemas.request import QcwyJobCrawlRequest
+from app.server.spider.src.service.spider_service import SpiderService
 
 
 class JobCrawlService:
-    """岗位采集编排服务，负责调用能力层爬虫并把结果写入原始岗位池。"""
+    """Job crawl orchestration service.
+
+    This service owns the business flow around crawling: creating crawl-run records,
+    running the local spider module, ingesting raw rows, and returning caller-facing rows.
+    """
 
     def __init__(
         self,
-        capability_spider_client: CapabilitySpiderClient | None = None,
+        spider_service: SpiderService | None = None,
         repository: JobRepository | None = None,
     ):
-        """
-        初始化岗位采集编排服务。
+        """Initialize the job crawl orchestration service.
+
         Args:
-            capability_spider_client: 能力层爬虫接口客户端。
-            repository: 岗位库数据访问对象。
+            spider_service: Local spider service. A default SpiderService is created when omitted.
+            repository: Job repository used to persist crawl runs and raw records.
         """
-        self.capability_spider_client = capability_spider_client or CapabilitySpiderClient()
+        self.spider_service = spider_service or SpiderService()
         self.repository = repository or JobRepository()
 
     def crawl_qcwy_jobs_and_ingest(self, db: Session, request: Any) -> dict[str, Any]:
-        """
-        编排前程无忧岗位采集和原始岗位入库流程。
+        """Run QCWY crawling and optionally ingest raw job records.
+
         Args:
-            db: 数据库会话。
-            request: 前程无忧岗位采集并入库请求。
+            db: Database session.
+            request: QCWY crawl-and-ingest request from the Job API layer.
+
         Returns:
-            包含采集结果、爬虫运行记录 ID 和入库统计的响应字典。
+            Crawl result, optional crawl_run_id, and optional ingest statistics.
         """
         crawl_run_id: int | None = None
         ingest_stats: dict[str, int] | None = None
@@ -49,13 +55,14 @@ class JobCrawlService:
             crawl_run_id = crawl_run.id
 
         try:
-            # 入库必须使用完整 rows，所以调用能力层时强制 fields 为空；
-            # 返回给调用方前再根据原始 request.fields 做字段裁剪。
-            capability_payload = request.model_dump(mode="json")
-            capability_payload.pop("persist_to_db", None)
-            capability_payload["fields"] = []
+            # Ingestion needs complete rows, so the local spider is called with fields=[] first.
+            # The public response is filtered later according to the original request.fields.
+            spider_payload = request.model_dump(mode="json")
+            spider_payload.pop("persist_to_db", None)
+            spider_payload["fields"] = []
+            spider_request = QcwyJobCrawlRequest.model_validate(spider_payload)
 
-            crawl_result = self.capability_spider_client.crawl_qcwy_jobs(capability_payload)
+            crawl_result = self.spider_service.crawl_qcwy_jobs(spider_request)
             rows = crawl_result.get("rows") or []
 
             if request.persist_to_db and crawl_run_id is not None:
@@ -83,13 +90,14 @@ class JobCrawlService:
             raise
 
     def _create_crawl_run(self, db: Session, request: Any) -> SpiderCrawlRun:
-        """
-        创建爬虫运行记录。
+        """Create a crawl-run record before the spider starts.
+
         Args:
-            db: 数据库会话。
-            request: 采集请求对象。
+            db: Database session.
+            request: Crawl request object.
+
         Returns:
-            已保存的爬虫运行记录。
+            Persisted SpiderCrawlRun model.
         """
         crawl_run = SpiderCrawlRun(
             platform="qcwy",
@@ -104,12 +112,12 @@ class JobCrawlService:
         return self.repository.create_crawl_run(crawl_run, db)
 
     def _mark_crawl_run_success(self, db: Session, crawl_run_id: int, total_count: int) -> None:
-        """
-        标记爬虫任务成功。
+        """Mark a crawl-run record as successful.
+
         Args:
-            db: 数据库会话。
-            crawl_run_id: 爬虫运行记录 ID。
-            total_count: 本次采集到的岗位数量。
+            db: Database session.
+            crawl_run_id: Crawl-run record ID.
+            total_count: Number of crawled raw rows.
         """
         self.repository.update_crawl_run(
             crawl_run_id,
@@ -120,12 +128,12 @@ class JobCrawlService:
         )
 
     def _mark_crawl_run_failed(self, db: Session, crawl_run_id: int, error_message: str) -> None:
-        """
-        标记爬虫任务失败。
+        """Mark a crawl-run record as failed.
+
         Args:
-            db: 数据库会话。
-            crawl_run_id: 爬虫运行记录 ID。
-            error_message: 失败原因。
+            db: Database session.
+            crawl_run_id: Crawl-run record ID.
+            error_message: Failure reason.
         """
         self.repository.update_crawl_run(
             crawl_run_id,
@@ -144,15 +152,16 @@ class JobCrawlService:
         platform: str,
         rows: list[dict[str, Any]],
     ) -> dict[str, int]:
-        """
-        把爬虫采集结果写入原始岗位表。
+        """Persist spider rows into the raw job record table.
+
         Args:
-            db: 数据库会话。
-            crawl_run_id: 本次爬虫运行记录 ID。
-            platform: 招聘平台标识，例如 qcwy。
-            rows: 爬虫返回的岗位行列表。
+            db: Database session.
+            crawl_run_id: Current crawl-run record ID.
+            platform: Recruitment platform code, such as qcwy.
+            rows: Spider result rows.
+
         Returns:
-            原始岗位入库统计信息。
+            Ingestion statistics.
         """
         raw_created = 0
         for row in rows:
@@ -167,20 +176,21 @@ class JobCrawlService:
         platform: str,
         row: dict[str, Any],
     ) -> JobRawRecord:
-        """
-        从爬虫行数据创建原始岗位记录。
+        """Create one raw job record from one spider row.
+
         Args:
-            db: 数据库会话。
-            crawl_run_id: 本次爬虫运行记录 ID。
-            platform: 招聘平台标识。
-            row: 单条爬虫岗位数据。
+            db: Database session.
+            crawl_run_id: Current crawl-run record ID.
+            platform: Recruitment platform code.
+            row: One spider result row.
+
         Returns:
-            已保存的原始岗位记录。
+            Persisted JobRawRecord model.
         """
         raw_json = self._parse_raw_json(row)
         collected_at = self._parse_datetime(row.get("collected_at")) or datetime.now()
 
-        # 原始岗位表只抽取少量通用检索字段，完整平台字段全部保存在 raw_json 中。
+        # Keep complete platform-specific data in raw_json while extracting only common searchable fields.
         raw_record = JobRawRecord(
             crawl_run_id=crawl_run_id,
             platform=platform,
@@ -197,12 +207,13 @@ class JobCrawlService:
         return self.repository.create_raw_record(raw_record, db)
 
     def _parse_raw_json(self, row: dict[str, Any]) -> dict[str, Any]:
-        """
-        从爬虫行数据中解析 raw_json 字段。
+        """Parse the row raw_json field into a JSONB-compatible dict.
+
         Args:
-            row: 单条爬虫岗位数据。
+            row: One spider result row.
+
         Returns:
-            可写入 JSONB 字段的原始数据字典。
+            Parsed raw JSON dictionary.
         """
         raw_json_value = row.get("raw_json")
         if isinstance(raw_json_value, dict):
@@ -215,14 +226,15 @@ class JobCrawlService:
         return dict(row)
 
     def _build_content_hash(self, platform: str, row: dict[str, Any], raw_json: dict[str, Any]) -> str:
-        """
-        构造岗位内容哈希，用于原始记录去重和后续排查。
+        """Build a stable content hash for deduplication and troubleshooting.
+
         Args:
-            platform: 招聘平台标识。
-            row: 单条爬虫岗位数据。
-            raw_json: 解析后的原始 JSON。
+            platform: Recruitment platform code.
+            row: One spider result row.
+            raw_json: Parsed raw JSON payload.
+
         Returns:
-            SHA256 内容哈希。
+            SHA256 content hash.
         """
         stable_payload = {
             "platform": platform,
@@ -237,12 +249,13 @@ class JobCrawlService:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def _parse_datetime(self, value: Any) -> datetime | None:
-        """
-        尽量把字符串时间解析成 datetime。
+        """Best-effort parse a raw datetime value.
+
         Args:
-            value: 原始时间值。
+            value: Raw datetime value.
+
         Returns:
-            datetime 对象；无法解析时返回 None。
+            Parsed datetime, or None when parsing fails.
         """
         if isinstance(value, datetime):
             return value
@@ -264,12 +277,13 @@ class JobCrawlService:
         return None
 
     def _to_optional_str(self, value: Any) -> str | None:
-        """
-        把任意值转换成可选字符串，空字符串会转为 None。
+        """Convert a raw value into an optional stripped string.
+
         Args:
-            value: 任意字段值。
+            value: Raw field value.
+
         Returns:
-            清理后的字符串或 None。
+            Stripped string, or None for empty values.
         """
         if value is None:
             return None
@@ -277,12 +291,13 @@ class JobCrawlService:
         return text or None
 
     def _filter_return_fields(self, rows: list[dict[str, Any]], fields: list[str]) -> list[dict[str, Any]]:
-        """
-        按调用方指定字段裁剪 API 返回数据。
+        """Filter API response rows by caller-selected fields.
+
         Args:
-            rows: 完整岗位数据列表。
-            fields: 调用方需要返回的字段名列表。
+            rows: Complete job rows.
+            fields: Field names requested by the caller.
+
         Returns:
-            已裁剪字段的岗位数据列表。
+            Rows containing only selected fields.
         """
         return [{field: row.get(field) for field in fields} for row in rows]
