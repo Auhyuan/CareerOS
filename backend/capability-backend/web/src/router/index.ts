@@ -93,6 +93,13 @@ const routes = [
     component: () => import('@/views/a2a/A2AVisualizer.vue'),
     meta: { layout: 'default', title: 'A2A 拓扑' },
   },
+  // 11. 接口文档
+  {
+    path: '/docs',
+    name: 'ApiDocs',
+    component: () => import('@/views/docs/ApiDocs.vue'),
+    meta: { layout: 'default', title: '接口文档' },
+  },
   // 保留示例页
   {
     path: '/empty',
