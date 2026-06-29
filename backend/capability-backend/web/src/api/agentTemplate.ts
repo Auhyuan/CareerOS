@@ -1,38 +1,37 @@
-/**
- * Agent 模板相关接口
- * 字段与路径完全对齐后端 /agent/templates/*
+﻿/**
+ * Agent 妯℃澘鐩稿叧鎺ュ彛
+ * 瀛楁涓庤矾寰勫畬鍏ㄥ榻愬悗绔?/agent/templates/*
  */
 import { httpPost } from './http'
 import type { PageRequest, PageResponse } from './types'
 
-/** 模型运行参数（ModelRuntimeOptions） */
+/** 妯″瀷杩愯鍙傛暟锛圡odelRuntimeOptions锛?*/
 export interface ModelRuntimeOptions {
-  model?: string | null
+  model_code?: string | null
   temperature?: number
   max_tokens?: number
   timeout_seconds?: number
   max_retries?: number
 }
 
-/** 可选能力（AgentOptionalFeatures） */
+/** 鍙€夎兘鍔涳紙AgentOptionalFeatures锛?*/
 export interface AgentOptionalFeatures {
   long_term_memory_enabled?: boolean
 }
 
-/** Agent 模板运行配置（AgentTemplateConfig） */
+/** Agent 妯℃澘杩愯閰嶇疆锛圓gentTemplateConfig锛?*/
 export interface AgentTemplateConfig {
   system_prompt?: string | null
-  response_format?: Record<string, unknown> | null
   tools?: string[]
   optional_features?: AgentOptionalFeatures
   is_sub_agent?: boolean
   a2a?: { sub_agent_list?: string[] } | null
   runtime_options?: ModelRuntimeOptions
-  /** 模板 config 是 JSONB，后端 ConfigDict(extra='allow') 允许其他扩展字段 */
+  /** 妯℃澘 config 鏄?JSONB锛屽悗绔?ConfigDict(extra='allow') 鍏佽鍏朵粬鎵╁睍瀛楁 */
   [key: string]: unknown
 }
 
-/** Agent 模板视图（AgentTemplateView） */
+/** Agent 妯℃澘瑙嗗浘锛圓gentTemplateView锛?*/
 export interface AgentTemplate {
   agent_id: string
   agent_name: string
@@ -43,17 +42,17 @@ export interface AgentTemplate {
   updated_at?: string | null
 }
 
-/** 分页搜索模板 */
+/** 鍒嗛〉鎼滅储妯℃澘 */
 export function searchAgentTemplates(params: PageRequest & { keyword?: string; status?: string }) {
   return httpPost<PageResponse<AgentTemplate>>('/agent/templates/search', params)
 }
 
-/** 查询模板详情 */
+/** 鏌ヨ妯℃澘璇︽儏 */
 export function getAgentTemplateDetail(agent_id: string) {
   return httpPost<AgentTemplate>('/agent/templates/detail', { agent_id })
 }
 
-/** 创建或更新模板 */
+/** 鍒涘缓鎴栨洿鏂版ā鏉?*/
 export function upsertAgentTemplate(payload: {
   agent_id: string
   agent_name: string
@@ -64,7 +63,8 @@ export function upsertAgentTemplate(payload: {
   return httpPost<AgentTemplate>('/agent/templates/upsert', payload)
 }
 
-/** 批量删除模板（与后端 /agent/templates/delete 接口对齐，请求体携带 ID 列表） */
+/** 鎵归噺鍒犻櫎妯℃澘锛堜笌鍚庣 /agent/templates/delete 鎺ュ彛瀵归綈锛岃姹備綋鎼哄甫 ID 鍒楄〃锛?*/
 export function deleteAgentTemplate(agent_ids: string[]) {
   return httpPost<number>('/agent/templates/delete', { agent_ids })
 }
+

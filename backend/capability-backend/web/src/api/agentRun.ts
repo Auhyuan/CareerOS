@@ -61,7 +61,6 @@ export interface AgentRunRequestPayload {
   conversation_id?: string
   stream?: boolean
   system_prompt?: string
-  response_format?: Record<string, unknown>
   inputs?: Record<string, unknown>
   files?: Array<Record<string, unknown>>
   tools?: string[]
@@ -70,7 +69,7 @@ export interface AgentRunRequestPayload {
   }
   a2a?: { sub_agent_list?: string[] } | null
   runtime_options?: {
-    model?: string | null
+    model_code?: string | null
     temperature?: number
     max_tokens?: number
     timeout_seconds?: number
@@ -82,7 +81,6 @@ export interface AgentRunRequestPayload {
 export interface AgentRunResponse {
   run_id: string
   answer: string
-  structured_output?: Record<string, unknown> | null
 }
 
 /** 同步运行 Agent（stream=false） */

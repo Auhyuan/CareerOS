@@ -44,13 +44,7 @@
         <a-form-item label="系统提示词" name="config.system_prompt">
           <a-textarea v-model:value="form.config.system_prompt" :rows="6" placeholder="System prompt" />
         </a-form-item>
-        <a-form-item label="结构化输出 (JSON Schema)">
-          <a-textarea
-            v-model:value="responseFormatText"
-            :rows="6"
-            placeholder='{ "type": "object", "properties": { ... } }'
-          />
-        </a-form-item>
+
       </a-card>
 
       <!-- 工具配置 -->
@@ -92,7 +86,7 @@
         <a-row :gutter="16">
           <a-col :span="8">
             <a-form-item label="模型别名">
-              <a-select v-model:value="form.config.runtime_options!.model" placeholder="选择模型" :options="modelOptions" allow-clear />
+              <a-select v-model:value="form.config.runtime_options!.model_code" placeholder="选择模型" :options="modelOptions" allow-clear />
             </a-form-item>
           </a-col>
           <a-col :span="8">
@@ -162,7 +156,8 @@ import {
   type AgentTemplate,
   upsertAgentTemplate,
 } from '@/api/agentTemplate'
-import { getCapabilities, getModelConfig } from '@/api/capabilities'
+import { getCapabilities } from '@/api/capabilities'
+import { searchModelConfigs } from '@/api/modelConfigs'
 
 defineOptions({ name: 'AgentEditView' })
 
@@ -182,11 +177,10 @@ const form = reactive<AgentTemplate>({
   status: 'active',
   config: {
     system_prompt: '',
-    response_format: undefined,
     tools: [],
     is_sub_agent: false,
     runtime_options: {
-      model: undefined,
+      model_code: undefined,
       temperature: 0.7,
       max_tokens: undefined,
       timeout_seconds: 60,
@@ -199,8 +193,6 @@ const form = reactive<AgentTemplate>({
   },
 })
 
-// response_format 双向 JSON 字符串
-const responseFormatText = ref('')
 
 // 表单校验
 const rules = {
@@ -223,8 +215,8 @@ async function loadOptions() {
     toolOptions.value = []
   }
   try {
-    const mc = await getModelConfig()
-    modelOptions.value = (mc.available_models || []).map((m) => ({ label: m, value: m }))
+    const modelPage = await searchModelConfigs({ page: 1, page_size: 100, model_type: 'chat', enabled: true })
+    modelOptions.value = (modelPage.items || []).map((item) => ({ label: item.model_code, value: item.model_code }))
   } catch {
     modelOptions.value = []
   }
@@ -261,26 +253,11 @@ async function loadDetail() {
     a2a: detail.config?.a2a || null,
   }
   a2aSubAgentList.value = detail.config?.a2a?.sub_agent_list || []
-  // 同步 JSON 字符串
-  if (detail.config?.response_format) {
-    responseFormatText.value = JSON.stringify(detail.config.response_format, null, 2)
-  }
 }
 
 /** 提交 */
 async function onSubmit() {
   await formRef.value?.validate()
-  // 解析 JSON
-  if (responseFormatText.value.trim()) {
-    try {
-      form.config.response_format = JSON.parse(responseFormatText.value)
-    } catch {
-      message.error('response_format JSON 格式错误')
-      return
-    }
-  } else {
-    form.config.response_format = undefined
-  }
   form.config.a2a = a2aSubAgentList.value.length
     ? { sub_agent_list: [...a2aSubAgentList.value] }
     : null

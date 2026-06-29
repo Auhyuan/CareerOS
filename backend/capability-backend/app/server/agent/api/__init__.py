@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.server.agent.api.agent_api import router as agent_run_router
 from app.server.agent.api.conversation_api import router as conversation_router
+from app.server.agent.api.model_config_api import router as model_config_router
 from app.server.agent.api.runs_api import router as runs_router
 from app.server.agent.api.template_api import router as template_router
 from app.server.agent.api.tools_api import router as tools_router
@@ -16,6 +17,7 @@ router.include_router(conversation_router)
 router.include_router(runs_router)
 router.include_router(template_router)
 router.include_router(tools_router)
+router.include_router(model_config_router)
 
 
 __all__ = ["router"]

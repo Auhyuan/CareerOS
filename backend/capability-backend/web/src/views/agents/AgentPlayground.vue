@@ -15,9 +15,9 @@
           <a-descriptions v-if="agentDetail" :column="1" size="small" bordered>
             <a-descriptions-item label="Agent ID">{{ agentDetail.agent_id }}</a-descriptions-item>
             <a-descriptions-item label="名称">{{ agentDetail.agent_name }}</a-descriptions-item>
-            <a-descriptions-item label="模型">{{ agentDetail.config?.model || '-' }}</a-descriptions-item>
-            <a-descriptions-item label="温度">{{ agentDetail.config?.temperature ?? '-' }}</a-descriptions-item>
-            <a-descriptions-item label="超时(秒)">{{ agentDetail.config?.timeout_seconds ?? '-' }}</a-descriptions-item>
+            <a-descriptions-item label="模型">{{ agentDetail.config?.runtime_options?.model_code || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="温度">{{ agentDetail.config?.runtime_options?.temperature ?? '-' }}</a-descriptions-item>
+            <a-descriptions-item label="超时(秒)">{{ agentDetail.config?.runtime_options?.timeout_seconds ?? '-' }}</a-descriptions-item>
             <a-descriptions-item label="工具">
               <a-tag v-for="t in agentDetail.config?.tools || []" :key="t" color="purple" class="mb-1">
                 {{ t }}
@@ -75,11 +75,7 @@
                 <span class="msg-time">{{ msg.time }}</span>
               </div>
               <div class="msg-content">{{ msg.content }}</div>
-              <a-collapse v-if="msg.structured" ghost>
-                <a-collapse-panel header="📦 结构化输出">
-                  <pre>{{ JSON.stringify(msg.structured, null, 2) }}</pre>
-                </a-collapse-panel>
-              </a-collapse>
+
             </div>
             <a-empty v-if="!messages.length" description="开始一次对话吧" />
           </div>
@@ -146,7 +142,6 @@ interface MessageItem {
   role: 'user' | 'assistant' | 'tool' | 'system'
   content: string
   tool_name?: string
-  structured?: Record<string, unknown>
   time: string
 }
 const messages = ref<MessageItem[]>([])
@@ -191,7 +186,6 @@ async function onRun() {
     query: userText,
     conversation_id: conversationId.value,
     system_prompt: tplCfg.system_prompt || undefined,
-    response_format: tplCfg.response_format || undefined,
     tools: overrideTools.value.length
       ? overrideTools.value
       : tplCfg.tools || undefined,
@@ -271,18 +265,10 @@ function handleStreamEvent(event: Record<string, any>, assistantIndex: number, a
   // final 事件是后端最终答案兜底；部分模型或结构化输出场景可能没有稳定 token 增量。
   if (event.type === 'final') {
     const finalAnswer = String(data.answer || event.answer || '')
-    const structured = data.structured_output as Record<string, unknown> | undefined
     if (finalAnswer) {
       messages.value[assistantIndex] = {
         ...messages.value[assistantIndex],
         content: finalAnswer,
-        structured,
-      }
-    } else if (structured) {
-      messages.value[assistantIndex] = {
-        ...messages.value[assistantIndex],
-        content: '已生成结构化输出',
-        structured,
       }
     }
     return

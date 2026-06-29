@@ -16,8 +16,6 @@ class CareerAgentState(AgentState, total=False):
     # tool_trace 用来记录工具调用过程，后续可以用于排查工具为什么被调用、入参是什么、耗时多少。
     tool_trace: NotRequired[list[dict[str, Any]]]
 
-    # structured_output 用来承接中间件或业务节点整理出的结构化结果。
-    structured_output: NotRequired[dict[str, Any]]
 
     # profile_draft 是岗位画像类 Agent 的预留状态，后续岗位画像生成流程可以逐步写入草稿。
     profile_draft: NotRequired[dict[str, Any]]

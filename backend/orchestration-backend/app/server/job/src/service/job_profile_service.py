@@ -319,8 +319,6 @@ class JobProfileService:
             raise BusinessException(code=503, msg="岗位画像生成 Agent 模板配置无效")
         if not isinstance(config.get("system_prompt"), str) or not config["system_prompt"].strip():
             raise BusinessException(code=503, msg="岗位画像生成 Agent 模板缺少 system_prompt")
-        if not isinstance(config.get("response_format"), dict) or not config["response_format"]:
-            raise BusinessException(code=503, msg="岗位画像生成 Agent 模板缺少 response_format")
         return config
 
     def _call_profile_agent(
@@ -363,9 +361,9 @@ class JobProfileService:
         Returns:
             修复后的 Agent 运行结果。
         """
-        original_output = agent_result.get("structured_output") or agent_result.get("answer") or ""
+        original_output = agent_result.get("answer") or ""
         query = (
-            "请修复下面的岗位画像输出，使其严格符合 response_format 定义的结构。"
+            "请修复下面的岗位画像输出，使其严格符合 ???? JSON 定义的结构。"
             "只能根据原始岗位材料修复，不得补充新事实。\n\n"
             f"原始岗位材料：\n{cleaned_job_text}\n\n"
             f"待修复输出：\n{original_output}\n\n"
@@ -404,7 +402,6 @@ class JobProfileService:
         return {
             "query": query,
             "system_prompt": template_config["system_prompt"],
-            "response_format": template_config["response_format"],
             "inputs": {},
             "files": [],
             "tools": list(template_config.get("tools") or []),
@@ -441,14 +438,11 @@ class JobProfileService:
             ValueError: 响应中不存在可解析的 JSON。
             ValidationError: JSON 不符合岗位画像 Schema。
         """
-        structured_output = agent_result.get("structured_output")
-        if isinstance(structured_output, dict):
-            profile_data = structured_output
-        else:
-            answer = agent_result.get("answer")
-            if not isinstance(answer, str) or not answer.strip():
-                raise ValueError("Agent 没有返回岗位画像内容")
-            profile_data = self._extract_json_object(answer)
+        # Agent no longer uses LangChain ???? JSON. The profile JSON is parsed from answer text.
+        answer = agent_result.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("Agent did not return job profile content")
+        profile_data = self._extract_json_object(answer)
 
         return GeneratedJobProfile.model_validate(profile_data)
 

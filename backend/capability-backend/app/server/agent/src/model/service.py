@@ -1,135 +1,98 @@
-import logging
-from typing import Any
+from sqlmodel import Session
 
-from app.server.agent.src.model.config import ModelConfig, configure_langsmith_environment, get_model_config
+from app.server.agent.src.model.models import ModelConfigRecord
+from app.server.agent.src.model.repository import ModelConfigRepository
+from app.server.agent.src.model.schemas import (
+    ModelConfigDeleteRequest,
+    ModelConfigSearchRequest,
+    ModelConfigSearchResponse,
+    ModelConfigUpsertRequest,
+    ModelConfigView,
+)
 
 
-logger = logging.getLogger("capability.agent.model")
+class ModelConfigService:
+    """模型配置服务，负责模型资源池的增删改查和运行时校验。"""
 
+    def __init__(self, repository: ModelConfigRepository | None = None):
+        """初始化模型配置服务。"""
+        self.repository = repository or ModelConfigRepository()
 
-class AgentModelService:
-    """Agent 服务的模型调用入口。"""
+    def upsert_model(self, db: Session, request: ModelConfigUpsertRequest) -> ModelConfigView:
+        """新增或更新模型配置。"""
+        record = self.repository.upsert(
+            db,
+            model_code=request.model_code,
+            original_model_code=request.original_model_code,
+            model_name=request.model_name,
+            model_type=request.model_type,
+            base_url=request.base_url,
+            api_key=request.api_key,
+            api_type=request.api_type,
+            support_stream=request.support_stream,
+            support_tool_calling=request.support_tool_calling,
+            support_structured_output=request.support_structured_output,
+            is_multimodal=request.is_multimodal,
+            enabled=request.enabled,
+            extra_config=request.extra_config,
+            description=request.description,
+        )
+        return self.to_view(record)
 
-    def __init__(self, config: ModelConfig | None = None):
-        """
-        初始化 Agent 模型服务。
+    def get_model(self, db: Session, model_code: str) -> ModelConfigView | None:
+        """查询单个模型配置视图。"""
+        record = self.repository.get_by_model_code(db, model_code)
+        return self.to_view(record) if record else None
 
-        Args:
-            config: 外部传入的模型网关配置；不传时读取 Agent 根目录 model_gateway.yaml。
-        """
-        self.config = config or get_model_config()
-        logger.info(
-            "Model gateway loaded: path=%s default_chat=%s available_aliases=%s",
-            self.config.gateway_path,
-            self.config.default_chat_alias,
-            sorted(self.config.models),
+    def search_models(self, db: Session, request: ModelConfigSearchRequest) -> ModelConfigSearchResponse:
+        """分页查询模型配置列表。"""
+        rows, total = self.repository.list_configs(
+            db,
+            keyword=request.keyword,
+            model_type=request.model_type,
+            enabled=request.enabled,
+            page=request.page,
+            page_size=request.page_size,
+        )
+        return ModelConfigSearchResponse(
+            total=total,
+            page=request.page,
+            page_size=request.page_size,
+            items=[self.to_view(row) for row in rows],
         )
 
-    def create_chat_model(
-        self,
-        *,
-        model: str | None = None,
-        temperature: float = 0.2,
-        timeout_seconds: int | None = None,
-        max_retries: int = 2,
-    ) -> Any:
-        """
-        根据模型别名创建 LangChain ChatModel 实例。
+    def delete_models(self, db: Session, request: ModelConfigDeleteRequest) -> int:
+        """批量删除模型配置。"""
+        return self.repository.delete_by_model_codes(db, request.model_codes)
 
-        Args:
-            model: model_gateway.yaml 中的 LLM 模型别名；不传时使用 chat_main。
-            temperature: 本次模型调用的采样温度。
-            timeout_seconds: 本次调用超时时间；不传时使用 YAML 中的 timeout。
-            max_retries: 本次模型调用的最大重试次数。
+    def require_enabled_chat_model(self, db: Session, model_code: str | None) -> ModelConfigRecord:
+        """校验并返回可用于 Agent 的已启用 chat 模型配置。"""
+        if not model_code:
+            raise RuntimeError("Agent 模板必须配置 runtime_options.model_code")
+        record = self.repository.get_enabled_chat_by_code(db, model_code)
+        if record is None:
+            raise RuntimeError(f"模型 {model_code} 不存在、未启用，或不是 chat 类型")
+        if not record.api_key:
+            raise RuntimeError(f"模型 {model_code} 未配置 api_key")
+        return record
 
-        Returns:
-            LangChain 可直接 invoke 的聊天模型对象。
-        """
-        configure_langsmith_environment(self.config)
-        definition = self.config.resolve_model(model, expected_kind="llm")
-        selected_alias = model or self.config.default_chat_alias
-        effective_timeout = timeout_seconds or definition.timeout
-        logger.info(
-            "Chat model initializing: alias=%s provider=%s model=%s base_url=%s temperature=%s timeout=%s max_retries=%s",
-            selected_alias,
-            definition.provider,
-            definition.model,
-            definition.base_url,
-            temperature,
-            effective_timeout,
-            max_retries,
+    def to_view(self, record: ModelConfigRecord) -> ModelConfigView:
+        """把数据库模型转换为接口返回视图，并返回本地配置中的 API Key。"""
+        return ModelConfigView(
+            id=record.id,
+            model_code=record.model_code,
+            model_name=record.model_name,
+            model_type=record.model_type,
+            base_url=record.base_url,
+            api_key=record.api_key,
+            api_type=record.api_type,
+            support_stream=record.support_stream,
+            support_tool_calling=record.support_tool_calling,
+            support_structured_output=record.support_structured_output,
+            is_multimodal=record.is_multimodal,
+            enabled=record.enabled,
+            extra_config=record.extra_config,
+            description=record.description,
+            created_at=record.created_at.isoformat() if record.created_at else None,
+            updated_at=record.updated_at.isoformat() if record.updated_at else None,
         )
-
-        from langchain_openai import ChatOpenAI
-
-        chat_model = ChatOpenAI(
-            api_key=definition.get_api_key(),
-            base_url=definition.base_url or None,
-            model=definition.model,
-            temperature=temperature,
-            timeout=effective_timeout,
-            max_retries=max_retries,
-        )
-        logger.info("Chat model initialized: alias=%s model=%s", selected_alias, definition.model)
-        return chat_model
-
-    def create_embedding_model(self, model: str | None = None) -> Any:
-        """
-        根据模型别名创建 Embedding 模型实例。
-
-        Args:
-            model: model_gateway.yaml 中的 Embedding 模型别名；不传时使用 embed_search。
-
-        Returns:
-            LangChain Embedding 模型对象。
-        """
-        definition = self.config.resolve_model(model, expected_kind="embedding")
-        selected_alias = model or self.config.default_embedding_alias
-        logger.info(
-            "Embedding model initializing: alias=%s provider=%s model=%s base_url=%s timeout=%s dimension=%s",
-            selected_alias,
-            definition.provider,
-            definition.model,
-            definition.base_url,
-            definition.timeout,
-            definition.dimension,
-        )
-
-        from langchain_openai import OpenAIEmbeddings
-
-        embedding_model = OpenAIEmbeddings(
-            api_key=definition.get_api_key(),
-            base_url=definition.base_url or None,
-            model=definition.model,
-            request_timeout=definition.timeout,
-            check_embedding_ctx_length=False,
-        )
-        logger.info("Embedding model initialized: alias=%s model=%s", selected_alias, definition.model)
-        return embedding_model
-
-
-def create_chat_model(
-    *,
-    model: str | None = None,
-    temperature: float = 0.2,
-    timeout_seconds: int | None = None,
-    max_retries: int = 2,
-) -> Any:
-    """
-    创建默认 Agent 聊天模型。
-
-    Args:
-        model: model_gateway.yaml 中的模型别名。
-        temperature: 本次模型调用的采样温度。
-        timeout_seconds: 本次调用超时时间；不传时使用 YAML 配置。
-        max_retries: 本次模型调用的最大重试次数。
-
-    Returns:
-        LangChain 聊天模型对象。
-    """
-    return AgentModelService().create_chat_model(
-        model=model,
-        temperature=temperature,
-        timeout_seconds=timeout_seconds,
-        max_retries=max_retries,
-    )

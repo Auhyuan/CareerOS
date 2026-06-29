@@ -6,13 +6,13 @@ from pydantic import BaseModel, Field, field_validator
 class ModelRuntimeOptions(BaseModel):
     """单次模型调用的运行参数。
 
-    该模型只描述“怎么调用模型”，不负责控制会话记忆、checkpointer 或 A2A 行为。
-    会话状态是否持久化统一由 AgentRunRequest.conversation_id 控制。
+    这里只描述“怎么调用模型”。模型连接信息通过 model_code 从 model 表模块中的 model_configs 表读取；
+    temperature、timeout_seconds、max_retries 属于具体 Agent/任务场景，因此保留在运行参数里。
     """
 
-    model: str | None = Field(
+    model_code: str | None = Field(
         default=None,
-        description="model_gateway.yaml 中的模型别名；为空时使用默认聊天模型 chat_main。",
+        description="平台模型编码，必须指向 model_configs 中已启用的 chat 模型。",
     )
     temperature: float = Field(
         default=0.2,
@@ -23,13 +23,22 @@ class ModelRuntimeOptions(BaseModel):
     timeout_seconds: int | None = Field(
         default=None,
         ge=1,
-        description="模型调用超时时间；为空时使用模型网关配置。",
+        description="模型调用超时时间；为空时交给模型客户端使用默认值。",
     )
     max_retries: int = Field(
         default=2,
         ge=0,
         description="模型调用失败时的最大重试次数。",
     )
+
+    @field_validator("model_code")
+    @classmethod
+    def normalize_model_code(cls, value: str | None) -> str | None:
+        """清理模型编码两侧空白，空字符串视为未配置。"""
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class AgentOptionalFeatures(BaseModel):
@@ -62,68 +71,33 @@ class AgentRunRequest(BaseModel):
     """通用 Agent 真实运行请求模型。
 
     /agent/run 是通用执行器，不绑定 agent_id。调用方如果想基于某个模板运行，
-    应先通过模板接口获取配置，再把 system_prompt、response_format、tools、a2a、runtime_options 等配置传入本请求。
+    应先通过模板接口获取配置，再把 system_prompt、、tools、a2a、runtime_options 等配置传入本请求。
 
     conversation_id 是会话记忆的唯一开关：
     - conversation_id 非空：作为 LangGraph thread_id，启用 PostgreSQL checkpointer，并写入用户可见会话记录。
     - conversation_id 为空：视为一次性任务或 A2A 子 Agent 调用，不启用 checkpointer，不写入 agent_conversations / agent_messages。
     """
 
-    query: str = Field(
-        ...,
-        min_length=1,
-        description="用户输入或编排层传入的任务指令。",
-    )
+    query: str = Field(..., min_length=1, description="用户输入或编排层传入的任务指令。")
     conversation_id: str | None = Field(
         default=None,
         description="会话 ID；非空时启用 checkpointer 和会话记录，空值时按一次性无会话任务运行。",
     )
-    stream: bool = Field(
-        default=False,
-        description="是否使用 SSE 流式返回；true 时 /agent/run 返回 text/event-stream。",
-    )
-    system_prompt: str | None = Field(
-        default=None,
-        description="本次运行使用的系统提示词；通常来自 Agent 模板配置。",
-    )
-    response_format: dict[str, Any] | None = Field(
-        default=None,
-        description="结构化输出 JSON Schema；为空时不启用结构化输出。",
-    )
-    inputs: dict[str, Any] = Field(
-        default_factory=dict,
-        description="编排层注入的业务变量，可用于 prompt 渲染和 runtime context。",
-    )
-    files: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="附件上下文预留字段；当前先作为 runtime context 透传。",
-    )
+    stream: bool = Field(default=False, description="是否使用 SSE 流式返回。")
+    system_prompt: str | None = Field(default=None, description="本次运行使用的系统提示词。")
+    inputs: dict[str, Any] = Field(default_factory=dict, description="编排层注入的业务变量。")
+    files: list[dict[str, Any]] = Field(default_factory=list, description="附件上下文预留字段。")
     tools: list[str] = Field(
         default_factory=list,
-        description="本次运行允许加载的常规工具名称；A2A 工具不需要写入这里，由 a2a.sub_agent_list 动态控制。",
+        description="本次运行允许加载的常规工具名称；A2A 工具由 a2a.sub_agent_list 动态控制。",
     )
     optional_features: AgentOptionalFeatures = Field(
         default_factory=AgentOptionalFeatures,
-        description="本次运行可选增强能力；不包含默认始终开启的基础中间件能力。",
+        description="本次运行可选增强能力。",
     )
-    a2a: AgentA2AConfig | None = Field(
-        default=None,
-        description="A2A 调用配置；sub_agent_list 非空时启用 A2A 动态工具和上下文注入。",
-    )
+    a2a: AgentA2AConfig | None = Field(default=None, description="A2A 调用配置。")
     runtime_options: ModelRuntimeOptions = Field(
         default_factory=ModelRuntimeOptions,
-        description="模型运行参数，只控制模型别名、温度、超时和重试次数。",
+        description="模型运行参数，必须包含可用 chat 模型的 model_code。",
     )
 
-    @field_validator("response_format")
-    @classmethod
-    def normalize_response_format(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        """规范化结构化输出配置。
-
-        Args:
-            value: 调用方传入的 JSON Schema。
-
-        Returns:
-            非空 JSON Schema；未配置或传入空对象时返回 None。
-        """
-        return value or None

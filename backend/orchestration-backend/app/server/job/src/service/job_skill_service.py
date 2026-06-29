@@ -9,6 +9,7 @@ from app.server.job.src.schemas.job_skill import (
     JobSkillBatchDeleteResponse,
     JobSkillCreateRequest,
     JobSkillCreateResponse,
+    JobSkillKeywordResult,
     JobSkillResponse,
     JobSkillSearchRequest,
     JobSkillSearchResponse,
@@ -29,24 +30,27 @@ class JobSkillService:
 
     def search_skills(self, db: Session, request: JobSkillSearchRequest) -> JobSkillSearchResponse:
         """
-        查询与关键字相关的岗位技能。
+        批量查询岗位技能，每个关键字独立查询并返回分组结果。
 
         Args:
             db: 数据库会话。
-            request: 技能查询条件。
+            request: 批量技能查询条件。
 
         Returns:
-            匹配到的岗位技能列表。
+            每个关键字的匹配结果。
         """
-        normalized_keyword = self.normalize_skill_name(request.keyword)
-        rows = self.repository.search(
-            db,
-            keyword=request.keyword,
-            normalized_keyword=normalized_keyword,
-            limit=request.limit,
-        )
-        items = [JobSkillResponse.model_validate(row) for row in rows]
-        return JobSkillSearchResponse(items=items, total=len(items))
+        results: list[JobSkillKeywordResult] = []
+        for keyword in request.keywords:
+            normalized = self.normalize_skill_name(keyword)
+            rows = self.repository.search(
+                db,
+                keyword=keyword,
+                normalized_keyword=normalized,
+                limit=request.limit_per_keyword,
+            )
+            items = [JobSkillResponse.model_validate(row) for row in rows]
+            results.append(JobSkillKeywordResult(keyword=keyword, items=items, total=len(items)))
+        return JobSkillSearchResponse(results=results)
 
     def create_skill(self, db: Session, request: JobSkillCreateRequest) -> JobSkillCreateResponse:
         """

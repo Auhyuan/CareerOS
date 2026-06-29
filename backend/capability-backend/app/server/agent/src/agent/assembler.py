@@ -2,6 +2,7 @@ import logging
 import time
 
 from langchain.agents import create_agent
+from sqlmodel import Session
 
 from app.server.agent.src.agent.assembly import AgentAssembly
 from app.server.agent.src.checkpoint import AgentCheckpointService
@@ -59,6 +60,7 @@ class AgentAssembler:
         self,
         request: AgentRunRequest,
         context: AgentRuntimeContext,
+        db: Session | None = None,
     ) -> AgentAssembly:
         """执行完整的 Agent 组装流程。
 
@@ -71,11 +73,10 @@ class AgentAssembler:
         """
         assembly_started_at = time.perf_counter()
         logger.info(
-            "Agent assembly started: thread_id=%s model_alias=%s tools=%s structured_output=%s",
+            "Agent 组装开始: thread_id=%s model_code=%s tools=%s",
             context.thread_id,
-            request.runtime_options.model or self.model_service.config.default_chat_alias,
+            request.runtime_options.model_code,
             request.tools,
-            request.response_format is not None,
         )
 
         # 第一步：从请求中直接构建内部装配配置（不再通过中间方法包装）。
@@ -84,13 +85,12 @@ class AgentAssembler:
         )
         build_config = AgentBuildConfig(
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
-            response_format=request.response_format,
             tool_names=request.tools,
             a2a=request.a2a,
             features=features,
         )
         logger.info(
-            "Agent build config ready: thread_id=%s memory=%s",
+            "Agent 构建配置就绪: thread_id=%s memory=%s",
             context.thread_id,
             features.enable_memory,
         )
@@ -101,7 +101,7 @@ class AgentAssembler:
             context.inputs,
         )
         logger.info(
-            "Agent system prompt rendered: thread_id=%s prompt_length=%d input_keys=%s",
+            "系统提示词渲染完成: thread_id=%s prompt_length=%d input_keys=%s",
             context.thread_id,
             len(system_prompt),
             sorted(context.inputs.keys()),
@@ -110,7 +110,7 @@ class AgentAssembler:
         # 第三步：按工具白名单加载本次可用工具。
         tools = self.tool_service.get_tools(build_config.tool_names)
         logger.info(
-            "Agent tools loaded: thread_id=%s requested=%d loaded=%d names=%s",
+            "工具加载完成: thread_id=%s requested=%d loaded=%d names=%s",
             context.thread_id,
             len(build_config.tool_names),
             len(tools),
@@ -131,7 +131,7 @@ class AgentAssembler:
         middleware_names = self.middleware_factory.describe_middlewares(features)
         state_schema_names = self.middleware_factory.describe_state_schemas(middlewares)
         logger.info(
-            "Agent middlewares assembled: thread_id=%s middlewares=%s state_schemas=%s",
+            "中间件装配完成: thread_id=%s middlewares=%s state_schemas=%s",
             context.thread_id,
             middleware_names,
             state_schema_names,
@@ -139,7 +139,8 @@ class AgentAssembler:
 
         # 第六步：创建聊天模型。
         model = self.model_service.create_chat_model(
-            model=request.runtime_options.model,
+            db=db,
+            model_code=request.runtime_options.model_code,
             temperature=request.runtime_options.temperature,
             timeout_seconds=request.runtime_options.timeout_seconds,
             max_retries=request.runtime_options.max_retries,
@@ -152,14 +153,14 @@ class AgentAssembler:
         if request.conversation_id:
             checkpointer = await self.checkpoint_service.get_checkpointer()
             logger.info(
-                "Agent checkpointer prepared: thread_id=%s enabled=%s",
+                "Checkpointer 已就绪: thread_id=%s enabled=%s",
                 context.thread_id,
                 checkpointer is not None,
             )
         else:
             checkpointer = None
             logger.info(
-                "Agent checkpointer skipped: thread_id=%s reason=empty_conversation_id",
+                "Checkpointer 已跳过: thread_id=%s reason=empty_conversation_id",
                 context.thread_id,
             )
 
@@ -168,13 +169,12 @@ class AgentAssembler:
             model=model,
             tools=tools,
             system_prompt=system_prompt,
-            response_format=build_config.response_format,
             context_schema=context_schema,
             middleware=middlewares,
             checkpointer=checkpointer,
         )
         logger.info(
-            "Agent assembly completed: thread_id=%s elapsed_ms=%.2f",
+            "Agent 组装完成: thread_id=%s elapsed_ms=%.2f",
             context.thread_id,
             (time.perf_counter() - assembly_started_at) * 1000,
         )
@@ -188,6 +188,7 @@ class AgentAssembler:
             middlewares=middlewares,
             context=context,
             metadata={
+                "model_code": request.runtime_options.model_code,
                 "tool_count": len(tools),
                 "tools": [getattr(tool, "name", tool.__class__.__name__) for tool in tools],
                 "middlewares": middleware_names,
@@ -195,7 +196,7 @@ class AgentAssembler:
                 "state_schemas": state_schema_names,
                 "checkpointer_enabled": checkpointer is not None,
                 "conversation_id_present": request.conversation_id is not None,
-                "structured_output_enabled": build_config.response_format is not None,
             },
         )
+
 

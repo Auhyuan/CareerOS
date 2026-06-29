@@ -58,5 +58,5 @@ class ToolErrorHandlerMiddleware(AgentMiddleware[CareerAgentState]):
         except GraphBubbleUp:
             raise
         except Exception as error:
-            logger.exception("Agent tool execution failed: name=%s", request.tool_call.get("name"))
+            logger.exception("工具执行失败: name=%s", request.tool_call.get("name"))
             return self._build_error_message(request, error)

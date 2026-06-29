@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import httpx
@@ -5,57 +6,10 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.types import Command
-from pydantic import BaseModel, Field, field_validator
 
 from app.server.agent.src.tools.job_tools.config import get_job_tool_config
 
-
-class SearchJobSkillsInput(BaseModel):
-    """查询岗位技能工具参数。"""
-
-    keyword: str = Field(min_length=1, max_length=255, description="需要查询的技能名称或关键字")
-    limit: int = Field(default=10, ge=1, le=20, description="最大返回数量")
-
-    @field_validator("keyword")
-    @classmethod
-    def strip_keyword(cls, value: str) -> str:
-        """
-        清理技能查询关键字并禁止纯空白内容。
-
-        Args:
-            value: Agent 提供的技能查询关键字。
-
-        Returns:
-            清理后的查询关键字。
-        """
-        cleaned_value = value.strip()
-        if not cleaned_value:
-            raise ValueError("keyword 不能为空")
-        return cleaned_value
-
-
-class CreateJobSkillInput(BaseModel):
-    """创建岗位技能工具参数。"""
-
-    name: str = Field(min_length=1, max_length=255, description="技能标准名称")
-    description: str = Field(min_length=1, max_length=2000, description="准确、简洁的技能描述")
-
-    @field_validator("name", "description")
-    @classmethod
-    def strip_required_text(cls, value: str) -> str:
-        """
-        清理技能名称和描述并禁止纯空白内容。
-
-        Args:
-            value: Agent 提供的技能名称或描述。
-
-        Returns:
-            清理后的文本。
-        """
-        cleaned_value = value.strip()
-        if not cleaned_value:
-            raise ValueError("字段不能为空")
-        return cleaned_value
+logger = logging.getLogger(__name__)
 
 
 async def _post_job_api(
@@ -64,19 +18,18 @@ async def _post_job_api(
     payload: dict[str, Any],
     operation_name: str,
 ) -> dict[str, Any]:
-    """
-    调用业务编排层 Job API 并解析统一响应。
+    """Call the orchestration Job API and unwrap the unified Result response.
 
     Args:
-        path: Job API 路径。
-        payload: POST 请求体。
-        operation_name: 用于异常提示的操作名称。
+        path: Job API path, such as /job/skills/search.
+        payload: JSON request body sent to the orchestration service.
+        operation_name: Human-readable operation name used in error messages.
 
     Returns:
-        统一响应中的 data 字典。
+        The data object inside the unified API response.
 
     Raises:
-        RuntimeError: HTTP 调用失败、响应格式异常或业务 code 非零。
+        RuntimeError: Raised when HTTP, JSON decoding, response shape, or business code fails.
     """
     config = get_job_tool_config()
     url = f"{config.orchestration_base_url.rstrip('/')}{path}"
@@ -86,38 +39,53 @@ async def _post_job_api(
             response = await client.post(url, json=payload)
             response.raise_for_status()
     except httpx.HTTPError as error:
-        raise RuntimeError(f"{operation_name}失败: {error}") from error
+        raise RuntimeError(f"{operation_name} failed: {error}") from error
 
     try:
         body = response.json()
     except ValueError as error:
-        raise RuntimeError(f"{operation_name}接口返回内容不是合法 JSON") from error
+        raise RuntimeError(f"{operation_name} returned invalid JSON") from error
 
     if not isinstance(body, dict):
-        raise RuntimeError(f"{operation_name}接口返回结构异常")
+        raise RuntimeError(f"{operation_name} returned an invalid response shape")
     if body.get("code") != 0:
-        raise RuntimeError(body.get("msg") or f"{operation_name}接口返回失败")
+        raise RuntimeError(body.get("msg") or f"{operation_name} returned a failure code")
 
     data = body.get("data")
     if not isinstance(data, dict):
-        raise RuntimeError(f"{operation_name}接口返回 data 结构异常")
+        raise RuntimeError(f"{operation_name} returned an invalid data object")
     return data
 
 
-def _get_runtime_value(runtime: ToolRuntime | None, key: str, default: str = "") -> str:
-    """从 LangGraph ToolRuntime 的 context 中读取运行时变量。
+def _clean_keywords(keywords: list[str]) -> list[str]:
+    """Normalize and validate skill search keywords before calling the Job API.
 
     Args:
-        runtime: LangGraph 注入的工具运行时对象。
-        key: 需要读取的运行时变量名。
-        default: 变量不存在时返回的默认值。
+        keywords: Raw keyword list supplied by the model or tool test UI.
 
     Returns:
-        运行时变量字符串；不存在时返回 default。
-    """
-    if runtime is None:
-        return default
+        Trimmed non-empty keywords.
 
+    Raises:
+        RuntimeError: Raised when no usable keyword remains after cleanup.
+    """
+    cleaned_keywords = [item.strip() for item in keywords if isinstance(item, str) and item.strip()]
+    if not cleaned_keywords:
+        raise RuntimeError("keywords must contain at least one non-empty value")
+    return cleaned_keywords
+
+
+def _get_runtime_value(runtime: ToolRuntime, key: str, default: str = "") -> str:
+    """Read a value from LangGraph ToolRuntime.context.
+
+    Args:
+        runtime: LangGraph-injected tool runtime. It must stay non-optional so LangGraph hides it from the model schema.
+        key: Runtime context key to read.
+        default: Value returned when the key is missing.
+
+    Returns:
+        Runtime context value converted to string.
+    """
     context = getattr(runtime, "context", None)
     if context is None:
         return default
@@ -126,84 +94,106 @@ def _get_runtime_value(runtime: ToolRuntime | None, key: str, default: str = "")
     return str(getattr(context, key, default) or default)
 
 
-def _format_skill_results(keyword: str, data: dict[str, Any]) -> str:
-    """将技能查询结果格式化为检索上下文文本。
+def _format_skill_results(data: dict[str, Any]) -> str:
+    """Format batched skill search results as retrieval context text.
 
     Args:
-        keyword: 查询关键字。
-        data: Job API 返回的 data 字典。
+        data: Job API data object containing a results list.
 
     Returns:
-        格式化后的检索上下文文本。
+        Text injected into the next model call by InjectRetrievalContextMiddleware.
     """
-    items = data.get("items") or []
-    total = data.get("total", 0)
-    if not items:
-        return f"技能查询「{keyword}」：未找到匹配结果。"
+    results = data.get("results") or []
+    if not results:
+        return "Skill search: no matching result."
 
-    lines = [f"技能查询「{keyword}」共 {total} 条结果（展示前 {len(items)} 条）："]
-    for idx, item in enumerate(items, start=1):
-        name = item.get("name", "未知")
-        skill_id = item.get("id") or item.get("skill_id", "-")
-        desc = item.get("description", "")
-        desc_text = desc[:200] if desc else "无描述"
-        lines.append(f"  {idx}. {name}（ID: {skill_id}）— {desc_text}")
-    return "\n".join(lines)
+    sections: list[str] = []
+    for result in results:
+        keyword = result.get("keyword", "")
+        items = result.get("items") or []
+        total = result.get("total", 0)
+        if not items:
+            sections.append(f"Skill search for '{keyword}': no matching result.")
+            continue
+
+        lines = [f"Skill search for '{keyword}': {total} result(s), showing {len(items)} item(s):"]
+        for idx, item in enumerate(items, start=1):
+            name = item.get("name", "unknown")
+            skill_id = item.get("id") or item.get("skill_id", "-")
+            desc = item.get("description", "")
+            desc_text = desc[:200] if desc else "no description"
+            lines.append(f"  {idx}. {name} (ID: {skill_id}) - {desc_text}")
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
 
 
-@tool("search_job_skills", args_schema=SearchJobSkillsInput)
-async def search_job_skills(keyword: str, limit: int = 10, runtime: ToolRuntime | None = None) -> Command | dict:
-    """
-    查询平台已存在的岗位技能。创建技能前必须先调用此工具，
-    如果结果中存在语义相同的技能，应直接引用返回的技能 ID。
+async def query_job_skills_data(keywords: list[str]) -> dict[str, Any]:
+    """Query job skills and return raw API data for non-Agent callers.
 
-    检索结果通过 Command 追加写入 state.retrieval_context，
-    由 InjectRetrievalContextMiddleware 注入到下一轮 system prompt。
+    This helper is used by the tool management test API. It intentionally does not require ToolRuntime,
+    because direct tool tests run outside LangGraph and therefore cannot receive runtime injection.
 
     Args:
-        keyword: 需要查询的技能名称或关键字。
-        limit: 最大返回数量。
-        runtime: LangGraph 工具运行时，用于获取 tool_call_id 和更新 state。
+        keywords: Skill keywords to search.
 
     Returns:
-        Command 对象（LangGraph 环境）或 dict（非 LangGraph 兜底）。
+        Raw data object returned by the orchestration Job API.
     """
-    data = await _post_job_api(
+    cleaned_keywords = _clean_keywords(keywords)
+    return await _post_job_api(
         path="/job/skills/search",
-        payload={"keyword": keyword, "limit": limit},
-        operation_name="查询岗位技能",
+        payload={"keywords": cleaned_keywords, "limit_per_keyword": 10},
+        operation_name="search job skills",
     )
 
-    context_str = _format_skill_results(keyword, data)
 
-    if runtime is not None:
-        tool_call_id = getattr(runtime, "tool_call_id", None)
-        return Command(update={
-            "messages": [ToolMessage(
-                content=f"技能查询完成，找到 {data.get('total', 0)} 条结果",
-                tool_call_id=tool_call_id,
-            )],
-            # 检索内容只对当前 run 生效；中间件会按 run_id 过滤后再注入 system prompt。
-            "retrieval_context": [{"run_id": _get_runtime_value(runtime, "run_id"), "content": context_str}],
-        })
-    return data
-
-
-@tool("create_job_skill", args_schema=CreateJobSkillInput)
-async def create_job_skill(name: str, description: str) -> dict[str, Any]:
-    """
-    创建一个平台岗位技能。仅当 search_job_skills 未找到相同技能时调用；
-    如果数据库中已经存在，接口会返回已有技能并将 created 标记为 false。
+@tool("search_job_skills")
+async def search_job_skills(keywords: list[str], runtime: ToolRuntime) -> Command:
+    """Search existing platform job skills and inject results into LangGraph state.
 
     Args:
-        name: 技能标准名称。
-        description: 准确、简洁的技能描述。
+        keywords: Skill keywords extracted by the model. Multiple keywords can be queried in one call.
+        runtime: LangGraph-injected tool runtime. Keep this argument required and typed as ToolRuntime so it is hidden
+            from the model-facing tool schema and Command state updates can work.
 
     Returns:
-        Job 技能创建接口返回的技能和创建状态。
+        A Command that appends a ToolMessage and writes retrieval_context for the next model turn.
     """
+    data = await query_job_skills_data(keywords)
+    context_str = _format_skill_results(data)
+
+    # The tool only returns a short success ToolMessage to the model. The real search content is written
+    # into retrieval_context, then InjectRetrievalContextMiddleware injects it before the next model call.
+    total_count = sum(result.get("total", 0) for result in (data.get("results") or []))
+    tool_call_id = runtime.tool_call_id
+    run_id = _get_runtime_value(runtime, "run_id")
+    return Command(update={
+        "messages": [ToolMessage(
+            content=f"Skill batch search completed, found {total_count} result(s).",
+            tool_call_id=tool_call_id,
+        )],
+        "retrieval_context": [{"run_id": run_id, "content": context_str}],
+    })
+
+
+@tool("create_job_skill")
+async def create_job_skill(name: str, description: str) -> dict[str, Any]:
+    """Create a platform job skill through the orchestration Job API.
+
+    Args:
+        name: Standard skill name.
+        description: Concise skill description.
+
+    Returns:
+        The created or reused skill and a created flag returned by the Job API.
+    """
+    cleaned_name = name.strip() if isinstance(name, str) else ""
+    cleaned_description = description.strip() if isinstance(description, str) else ""
+    if not cleaned_name or not cleaned_description:
+        raise RuntimeError("name and description must be non-empty")
+
     return await _post_job_api(
         path="/job/skills/create",
-        payload={"name": name, "description": description},
-        operation_name="创建岗位技能",
+        payload={"name": cleaned_name, "description": cleaned_description},
+        operation_name="create job skill",
     )

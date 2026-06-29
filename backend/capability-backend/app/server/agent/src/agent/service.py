@@ -139,19 +139,18 @@ class AgentService:
                 user_message_id=user_message_id,
                 query=request.query,
                 metadata={
+                    "model_code": request.runtime_options.model_code,
                     "tools": request.tools,
                     "a2a_sub_agent_list": request.a2a.sub_agent_list if request.a2a else [],
-                    "structured_output_enabled": request.response_format is not None,
                 },
             )
         logger.info(
-            "Agent run started: run_id=%s thread_id=%s query_length=%d persistent_conversation=%s "
-            "structured_output=%s stream=%s conversation_id_present=%s",
+            "Agent 运行开始: run_id=%s thread_id=%s query_length=%d persistent_conversation=%s "
+            "stream=%s conversation_id_present=%s",
             context.run_id,
             context.thread_id,
             len(request.query),
             request.conversation_id is not None,
-            request.response_format is not None,
             request.stream,
             request.conversation_id is not None,
         )
@@ -242,11 +241,11 @@ class AgentService:
 
         try:
             # 第二步：组装 Agent。这里会加载模型、工具、中间件、结构化输出和 checkpointer。
-            assembly = await self.assembler.assemble(request, context)
+            assembly = await self.assembler.assemble(request, context, db)
         except Exception as error:
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             logger.exception(
-                "Agent assembly failed: run_id=%s thread_id=%s elapsed_ms=%.2f",
+                "Agent 组装失败: run_id=%s thread_id=%s elapsed_ms=%.2f",
                 context.run_id,
                 context.thread_id,
                 elapsed_ms,
@@ -256,7 +255,7 @@ class AgentService:
 
         # 第三步：只传入本轮用户消息；跨轮 Agent 记忆由 checkpointer 根据 thread_id 恢复。
         input_messages = [{"role": "user", "content": request.query}]
-        logger.info("Agent execution started: run_id=%s thread_id=%s", context.run_id, context.thread_id)
+        logger.info("Agent 执行开始: run_id=%s thread_id=%s", context.run_id, context.thread_id)
         try:
             result = await assembly.agent.ainvoke(
                 {"messages": input_messages},
@@ -266,7 +265,7 @@ class AgentService:
         except Exception as error:
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             logger.exception(
-                "Agent execution failed: run_id=%s thread_id=%s elapsed_ms=%.2f",
+                "Agent 执行失败: run_id=%s thread_id=%s elapsed_ms=%.2f",
                 context.run_id,
                 context.thread_id,
                 elapsed_ms,
@@ -283,7 +282,6 @@ class AgentService:
 
         # 第四步：提取最终回答和结构化输出。
         answer = result["messages"][-1].content if result.get("messages") else ""
-        structured_output = result.get("structured_response") or result.get("structured_output")
 
         # AIMessage.tool_calls 记录模型实际发出的工具调用。
         # 统计该值可以区分“工具已装配但模型未选择调用”和“工具执行阶段发生异常”。
@@ -296,12 +294,11 @@ class AgentService:
 
         elapsed_ms = (time.perf_counter() - run_started_at) * 1000
         logger.info(
-            "Agent execution completed: run_id=%s thread_id=%s answer_length=%d structured_output=%s "
+            "Agent 执行完成: run_id=%s thread_id=%s answer_length=%d "
             "tool_call_count=%d tool_calls=%s elapsed_ms=%.2f",
             context.run_id,
             context.thread_id,
             len(answer) if isinstance(answer, str) else 0,
-            structured_output is not None,
             len(tool_call_names),
             tool_call_names,
             elapsed_ms,
@@ -318,7 +315,7 @@ class AgentService:
         )
 
         logger.info(
-            "Agent run finished: run_id=%s thread_id=%s context_saved=%s total_elapsed_ms=%.2f",
+            "Agent 运行结束: run_id=%s thread_id=%s context_saved=%s total_elapsed_ms=%.2f",
             context.run_id,
             context.thread_id,
             context_enabled,
@@ -328,7 +325,6 @@ class AgentService:
         return AgentRunResponse(
             run_id=context.run_id,
             answer=answer,
-            structured_output=structured_output,
         )
 
     # ── 流式执行 ────────────────────────────────────────────────
@@ -358,7 +354,7 @@ class AgentService:
 
         try:
             # 第二步：组装 Agent。这里会加载模型、工具、中间件、结构化输出和 checkpointer。
-            assembly = await self.assembler.assemble(request, context)
+            assembly = await self.assembler.assemble(request, context, db)
             yield {
                 "type": "agent_assembled",
                 "data": {
@@ -389,7 +385,6 @@ class AgentService:
 
             # 第五步：提取最终回答和结构化输出。
             answer = self._extract_answer_from_result(final_result or {})
-            structured_output = self._extract_structured_output_from_result(final_result or {})
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             await self._finalize_run(
                 context,
@@ -405,7 +400,6 @@ class AgentService:
                 "data": {
                     "run_id": context.run_id,
                     "answer": answer,
-                    "structured_output": structured_output,
                 },
             }
             yield {
@@ -419,7 +413,7 @@ class AgentService:
         except Exception as error:
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             logger.exception(
-                "Agent stream execution failed: run_id=%s thread_id=%s elapsed_ms=%.2f",
+                "Agent 流式执行失败: run_id=%s thread_id=%s elapsed_ms=%.2f",
                 context.run_id,
                 context.thread_id,
                 elapsed_ms,
@@ -441,6 +435,21 @@ class AgentService:
                 },
             }
     # ── 流事件解析 ──────────────────────────────────────────────
+
+    @staticmethod
+    def _safe_event_value(obj: Any) -> Any:
+        """把 LangChain 内部对象（Command、ToolMessage 等）转为安全的 dict/str。"""
+        if obj is None or isinstance(obj, (str, int, float, bool)):
+            return obj
+        if isinstance(obj, dict):
+            return {k: AgentService._safe_event_value(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [AgentService._safe_event_value(v) for v in obj]
+        if hasattr(obj, "model_dump"):
+            return AgentService._safe_event_value(obj.model_dump())
+        if hasattr(obj, "dict") and callable(obj.dict):
+            return AgentService._safe_event_value(obj.dict())
+        return str(obj)
 
     def _normalize_stream_event(self, raw_event: dict[str, Any]) -> dict[str, Any] | None:
         """将 LangChain 原始流事件转换为平台 SSE 事件。
@@ -476,7 +485,7 @@ class AgentService:
                 "type": "tool_call_start",
                 "data": {
                     "tool_name": runnable_name,
-                    "input": data.get("input"),
+                    "input": self._safe_event_value(data.get("input")),
                 },
             }
 
@@ -485,7 +494,7 @@ class AgentService:
                 "type": "tool_call_result",
                 "data": {
                     "tool_name": runnable_name,
-                    "output": data.get("output"),
+                    "output": self._safe_event_value(data.get("output")),
                 },
             }
 
@@ -498,17 +507,12 @@ class AgentService:
             raw_event: LangChain/LangGraph astream_events 产出的原始事件。
 
         Returns:
-            包含 messages 或 structured_response 的输出字典；没有时返回 None。
         """
         if raw_event.get("event") != "on_chain_end":
             return None
 
         output = (raw_event.get("data") or {}).get("output")
-        if isinstance(output, dict) and (
-            "messages" in output
-            or "structured_response" in output
-            or "structured_output" in output
-        ):
+        if isinstance(output, dict) and "messages" in output:
             return output
         return None
 
@@ -527,17 +531,6 @@ class AgentService:
         content = getattr(messages[-1], "content", "")
         return content if isinstance(content, str) else str(content)
 
-    def _extract_structured_output_from_result(self, result: dict[str, Any]) -> dict[str, Any] | None:
-        """从 Agent 最终结果中提取结构化输出。
-
-        Args:
-            result: Agent 执行最终结果。
-
-        Returns:
-            结构化输出字典；不存在时返回 None。
-        """
-        structured_output = result.get("structured_response") or result.get("structured_output")
-        return structured_output if isinstance(structured_output, dict) else None
 
     def _extract_message_text(self, message: Any) -> str:
         """从模型消息或消息分片中提取普通文本。
@@ -598,3 +591,4 @@ class AgentService:
                     parts.append(str(item.get("text") or item.get("content") or ""))
             return "".join(parts)
         return ""
+

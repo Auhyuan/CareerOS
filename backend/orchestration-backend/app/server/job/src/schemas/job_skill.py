@@ -4,27 +4,21 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class JobSkillSearchRequest(BaseModel):
-    """岗位技能查询请求。"""
+    """岗位技能批量查询请求。"""
 
-    keyword: str = Field(min_length=1, max_length=255, description="技能查询关键字")
-    limit: int = Field(default=10, ge=1, le=20, description="最大返回数量")
+    keywords: list[str] = Field(
+        min_length=1, description="技能查询关键字列表"
+    )
+    limit_per_keyword: int = Field(default=10, ge=1, le=20, description="每个关键字最大返回数量")
 
-    @field_validator("keyword")
+    @field_validator("keywords")
     @classmethod
-    def strip_keyword(cls, value: str) -> str:
-        """
-        清理技能查询关键字并禁止纯空白内容。
-
-        Args:
-            value: 调用方传入的技能关键字。
-
-        Returns:
-            清理后的技能关键字。
-        """
-        cleaned_value = value.strip()
-        if not cleaned_value:
-            raise ValueError("keyword 不能为空")
-        return cleaned_value
+    def strip_keywords(cls, value: list[str]) -> list[str]:
+        """清理关键字，去除空白和空字符串。"""
+        cleaned = [kw.strip() for kw in value if kw.strip()]
+        if not cleaned:
+            raise ValueError("keywords 至少需要一个非空关键字")
+        return cleaned
 
 
 class JobSkillCreateRequest(BaseModel):
@@ -64,11 +58,18 @@ class JobSkillResponse(BaseModel):
     updated_at: datetime
 
 
-class JobSkillSearchResponse(BaseModel):
-    """岗位技能查询结果。"""
+class JobSkillKeywordResult(BaseModel):
+    """单个关键字的查询结果。"""
 
-    items: list[JobSkillResponse] = Field(default_factory=list, description="匹配到的技能列表")
-    total: int = Field(default=0, description="本次返回的技能数量")
+    keyword: str = Field(description="查询关键字")
+    items: list[JobSkillResponse] = Field(default_factory=list, description="匹配技能列表")
+    total: int = Field(default=0, description="匹配数量")
+
+
+class JobSkillSearchResponse(BaseModel):
+    """岗位技能批量查询结果。"""
+
+    results: list[JobSkillKeywordResult] = Field(default_factory=list, description="每个关键字的查询结果")
 
 
 class JobSkillCreateResponse(BaseModel):

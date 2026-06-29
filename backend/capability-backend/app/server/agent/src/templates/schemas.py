@@ -1,6 +1,4 @@
-from typing import Any
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.server.agent.src.schemas.request import AgentA2AConfig, AgentOptionalFeatures, ModelRuntimeOptions
 
@@ -12,10 +10,6 @@ class AgentTemplateConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     system_prompt: str | None = Field(default=None, description="Agent 默认系统提示词")
-    response_format: dict[str, Any] | None = Field(
-        default=None,
-        description="结构化输出 JSON Schema；为空时不启用结构化输出",
-    )
     tools: list[str] = Field(default_factory=list, description="Agent 默认可用工具名称")
     optional_features: AgentOptionalFeatures = Field(
         default_factory=AgentOptionalFeatures,
@@ -31,19 +25,6 @@ class AgentTemplateConfig(BaseModel):
         description="Agent 默认模型运行参数",
     )
 
-    @field_validator("response_format")
-    @classmethod
-    def normalize_response_format(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        """
-        规范化模板中的结构化输出配置。
-
-        Args:
-            value: 模板保存的 JSON Schema。
-
-        Returns:
-            非空 JSON Schema；未配置或传入空对象时返回 None。
-        """
-        return value or None
 
 
 class AgentTemplateUpsertRequest(BaseModel):

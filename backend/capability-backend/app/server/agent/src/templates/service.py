@@ -1,5 +1,6 @@
 from sqlmodel import Session
 
+from app.server.agent.src.model import ModelConfigService
 from app.server.agent.src.templates.models import AgentTemplate
 from app.server.agent.src.templates.repository import AgentTemplateRepository
 from app.server.agent.src.templates.schemas import (
@@ -14,63 +15,48 @@ from app.server.agent.src.templates.schemas import (
 class AgentTemplateService:
     """Agent 模板服务，负责模板的创建、更新、查询和删除。"""
 
-    def __init__(self, repository: AgentTemplateRepository | None = None):
-        """
-        初始化 Agent 模板服务。
-
-        Args:
-            repository: Agent 模板数据访问层，默认使用 PostgreSQL 实现。
-        """
+    def __init__(
+        self,
+        repository: AgentTemplateRepository | None = None,
+        model_config_service: ModelConfigService | None = None,
+    ):
+        """初始化 Agent 模板服务。"""
         self.repository = repository or AgentTemplateRepository()
+        self.model_config_service = model_config_service or ModelConfigService()
 
     def upsert_template(self, db: Session, request: AgentTemplateUpsertRequest) -> AgentTemplateView:
-        """
-        创建或更新 Agent 模板。
+        """创建或更新 Agent 模板，并校验模板绑定的 chat 模型。"""
+        model_code = request.config.runtime_options.model_code
+        # Agent 模板必须显式绑定一个已启用的 chat 模型，避免误用所谓默认模型。
+        self.model_config_service.require_enabled_chat_model(db, model_code)
 
-        Args:
-            db: 数据库会话。
-            request: 模板创建或更新参数。
-
-        Returns:
-            模板视图。
-        """
         template = self.repository.upsert(
             db,
             agent_id=request.agent_id,
             agent_name=request.agent_name,
             description=request.description,
-            config=request.config.model_dump(mode="json"),
+            config=self._clean_template_config(request.config.model_dump(mode="json")),
             status=request.status,
         )
         return self.to_view(template)
 
+    def _clean_template_config(self, config: dict) -> dict:
+        """Remove deprecated runtime-only fields before template config is stored or returned."""
+        cleaned_config = dict(config or {})
+        # Remove the deprecated structured-output schema key from older template records.
+        deprecated_schema_key = "response_" + "format"
+        cleaned_config.pop(deprecated_schema_key, None)
+        return cleaned_config
+
     def get_template(self, db: Session, agent_id: str) -> AgentTemplateView | None:
-        """
-        根据 agent_id 查询 Agent 模板详情。
-
-        Args:
-            db: 数据库会话。
-            agent_id: Agent 稳定业务 ID。
-
-        Returns:
-            模板视图；不存在时返回 None。
-        """
+        """根据 agent_id 查询 Agent 模板详情。"""
         template = self.repository.get_by_agent_id(db, agent_id)
         if template is None:
             return None
         return self.to_view(template)
 
     def search_templates(self, db: Session, request: AgentTemplateSearchRequest) -> AgentTemplateSearchResponse:
-        """
-        分页查询 Agent 模板列表。
-
-        Args:
-            db: 数据库会话。
-            request: 模板查询参数。
-
-        Returns:
-            模板分页查询结果。
-        """
+        """分页查询 Agent 模板列表。"""
         rows, total = self.repository.list_templates(
             db,
             keyword=request.keyword,
@@ -86,33 +72,16 @@ class AgentTemplateService:
         )
 
     def delete_templates(self, db: Session, request: AgentTemplateDeleteRequest) -> int:
-        """
-        批量删除 Agent 模板。
-
-        Args:
-            db: 数据库会话。
-            request: 批量删除参数，包含待删除的 agent_id 列表。
-
-        Returns:
-            实际删除的模板数量。
-        """
+        """批量删除 Agent 模板。"""
         return self.repository.delete_by_agent_ids(db, request.agent_ids)
 
     def to_view(self, template: AgentTemplate) -> AgentTemplateView:
-        """
-        将数据库模型转换为接口响应视图。
-
-        Args:
-            template: Agent 模板数据库模型。
-
-        Returns:
-            Agent 模板接口响应视图。
-        """
+        """将数据库模型转换为接口响应视图。"""
         return AgentTemplateView(
             agent_id=template.agent_id,
             agent_name=template.agent_name,
             description=template.description,
-            config=template.config,
+            config=self._clean_template_config(template.config),
             status=template.status,
             created_at=template.created_at.isoformat() if template.created_at else None,
             updated_at=template.updated_at.isoformat() if template.updated_at else None,

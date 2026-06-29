@@ -42,10 +42,10 @@ class ToolLoggingMiddleware(AgentMiddleware[CareerAgentState]):
         start_time = time.time()
 
         logger.info(
-            "Agent tool call start: name=%s arg_keys=%s",
+            "工具调用开始: name=%s arg_keys=%s",
             tool_name,
             sorted(tool_args.keys()) if isinstance(tool_args, dict) else [],
         )
         response = await handler(request)
-        logger.info("Agent tool call end: name=%s cost=%.3fs", tool_name, time.time() - start_time)
+        logger.info("工具调用结束: name=%s cost=%.3fs", tool_name, time.time() - start_time)
         return response

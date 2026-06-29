@@ -106,13 +106,13 @@ class A2AAgentContextMiddleware(AgentMiddleware[CareerAgentState]):
             for agent_id in agent_ids:
                 template = template_service.get_template(db, agent_id)
                 if template is None:
-                    logger.warning("A2A sub-agent not found: agent_id=%s", agent_id)
+                    logger.warning("A2A 子 Agent 未找到: agent_id=%s", agent_id)
                     continue
 
                 # 只有模板显式声明 is_sub_agent=true，才允许被作为子 Agent 暴露给主 Agent。
                 # 这可以避免普通对话 Agent 被误配置进 A2A 列表后直接参与内部调用。
                 if not template.config.is_sub_agent:
-                    logger.warning("A2A sub-agent is not enabled: agent_id=%s", agent_id)
+                    logger.warning("A2A 子 Agent 未启用: agent_id=%s", agent_id)
                     continue
 
                 metas.append({
