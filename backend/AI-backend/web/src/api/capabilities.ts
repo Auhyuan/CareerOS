@@ -1,10 +1,10 @@
 /**
- * 绯荤粺鑳藉姏銆佸仴搴锋鏌ヤ笌妯″瀷閰嶇疆鐩稿叧鎺ュ彛
- * 瀹屽叏瀵归綈鍚庣 AgentCapabilityResponse / ModelConfigResponse / AgentHealth
+ * 系统能力、健康检查与模型配置相关接口。
+ * 对齐后端 AgentCapabilityResponse / ModelConfigResponse / AgentHealth。
  */
 import { httpGet } from './http'
 
-/** Agent 宸ュ叿璇︽儏 */
+/** Agent 工具详情。 */
 export interface AgentToolInfo {
   name: string
   description: string
@@ -14,23 +14,23 @@ export interface AgentToolInfo {
   args_schema: Record<string, any>
 }
 
-/** Agent 鏈嶅姟鑳藉姏鍝嶅簲锛?agent/capabilities锛?*/
+/** Agent 服务能力响应：/agent/capabilities。 */
 export interface AgentCapabilityResponse {
   service_name: string
   modules: string[]
   enabled_features: string[]
-  /** 鍚庣 list_tools() 杩斿洖鐨勬槸瀛楃涓叉暟缁勶紝涓嶆槸瀵硅薄 */
+  /** 后端返回的可选择工具编码列表，包含 MCP 工具编码。 */
   registered_tools: string[]
-  /** 鍚庣杩斿洖鐨勫伐鍏疯鎯咃紝鍖呭惈鍙傛暟 Schema 鍜屽姩鎬佸伐鍏疯鏄?*/
+  /** 后端返回的工具详情，包含参数 Schema 和动态工具说明。 */
   tools?: AgentToolInfo[]
 }
 
-/** 鑾峰彇 Agent 鏈嶅姟鑳藉姏娓呭崟 */
+/** 获取 Agent 服务能力清单。 */
 export function getCapabilities() {
   return httpGet<AgentCapabilityResponse>('/agent/capabilities')
 }
 
-/** 模型配置摘要响应（/agent/model/config） */
+/** 模型配置摘要响应：/agent/model/config。 */
 export interface ModelConfigResponse {
   available_models: string[]
   chat_models: string[]
@@ -42,17 +42,18 @@ export interface ModelConfigResponse {
   has_langsmith_api_key: boolean
 }
 
-/** 获取当前模型配置摘要 */
+/** 获取当前模型配置摘要。 */
 export function getModelConfig() {
   return httpGet<ModelConfigResponse>('/agent/model/config')
 }
-/** Agent 鍋ュ悍妫€鏌ワ紙/agent/health锛?*/
+
+/** Agent 健康检查响应：/agent/health。 */
 export interface AgentHealthResponse {
   service: string
   status: string
 }
 
-/** Agent 鍋ュ悍妫€鏌?*/
+/** Agent 健康检查。 */
 export function getHealth() {
   return httpGet<AgentHealthResponse>('/agent/health')
 }

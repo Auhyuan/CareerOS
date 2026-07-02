@@ -108,7 +108,7 @@ class AgentAssembler:
         )
 
         # 第三步：按工具白名单加载本次可用工具。
-        tools = self.tool_service.get_tools(build_config.tool_names)
+        tools = await self.tool_service.get_tools(build_config.tool_names, db=db)
         logger.info(
             "工具加载完成: thread_id=%s requested=%d loaded=%d names=%s",
             context.thread_id,

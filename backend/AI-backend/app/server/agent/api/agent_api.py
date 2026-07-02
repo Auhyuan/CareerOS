@@ -12,7 +12,9 @@ from app.server.agent.src.agent import AgentService
 from app.server.agent.src.model import ModelConfigService
 from app.server.agent.src.model.schemas import ModelConfigSearchRequest
 from app.server.agent.src.schemas.request import AgentRunRequest
+from app.server.agent.src.mcp.schemas import AgentMCPToolSearchRequest
 from app.server.agent.src.schemas.response import AgentCapabilityResponse, AgentRunResponse, ModelConfigResponse
+from app.server.agent.src.tools.schemas import AgentToolInfo
 
 
 router = APIRouter()
@@ -45,8 +47,11 @@ def get_current_model_config(db: Session = Depends(get_postgres_engine)):
 
 
 @router.get("/capabilities", response_model=Result[AgentCapabilityResponse], summary="查询 Agent 服务能力")
-def get_agent_capabilities():
+def get_agent_capabilities(db: Session = Depends(get_postgres_engine)):
     """查询 Agent 服务当前已经挂载的能力模块。"""
+    internal_tools = agent_service.tool_service.list_tool_details()
+    mcp_tools = _list_mcp_tool_details(db)
+    all_tools = internal_tools + mcp_tools
     return Result.success(
         AgentCapabilityResponse(
             service_name="agent",
@@ -76,10 +81,38 @@ def get_agent_capabilities():
                 "graph_state_schema",
                 "job_skill_http_tools",
             ],
-            registered_tools=agent_service.tool_service.list_tools(),
-            tools=agent_service.tool_service.list_tool_details(),
+            registered_tools=[tool.name for tool in all_tools if tool.group != "a2a"],
+            tools=all_tools,
         )
     )
+
+
+def _list_mcp_tool_details(db: Session) -> list[AgentToolInfo]:
+    """查询已启用 MCP 工具，并转换为工具管理页可展示结构。"""
+    result = agent_service.tool_service.mcp_service.search_tools(
+        db,
+        AgentMCPToolSearchRequest(status="enabled", page=1, page_size=100),
+    )
+    return [
+        AgentToolInfo(
+            name=item.mcp_code,
+            description=item.description or "",
+            group="mcp",
+            invokable=True,
+            invoke_note=f"MCP 外部工具，真实工具名：{item.name}",
+            args_schema=_normalize_tool_schema(item.input_schema),
+        )
+        for item in result.items
+    ]
+
+
+def _normalize_tool_schema(schema: dict[str, Any] | None) -> dict[str, Any]:
+    """把 MCP 工具参数 schema 统一成前端表单期望的 JSON Schema 结构。"""
+    if not schema:
+        return {}
+    if "properties" in schema:
+        return schema
+    return {"type": "object", "properties": schema, "required": []}
 
 
 def _format_sse_event(event: dict[str, Any]) -> str:
