@@ -5,6 +5,7 @@ from typing import Any
 from sqlmodel import Session
 
 from app.common.db.postgres_db import get_db_session
+from app.server.agent.src.model.openai_chat import ReasoningChatOpenAI
 from app.server.agent.src.model.service import ModelConfigService
 
 
@@ -74,15 +75,21 @@ class AgentModelService:
             max_retries,
         )
 
-        from langchain_openai import ChatOpenAI
+        extra_config = dict(definition.extra_config or {})
+        logger.info(
+            "聊天模型额外配置: model_code=%s extra_keys=%s",
+            definition.model_code,
+            sorted(extra_config.keys()),
+        )
 
-        chat_model = ChatOpenAI(
+        chat_model = ReasoningChatOpenAI(
             api_key=definition.api_key,
             base_url=definition.base_url or None,
             model=definition.model_name,
             temperature=temperature,
             timeout=effective_timeout,
             max_retries=max_retries,
+            **extra_config,
         )
         logger.info("聊天模型初始化完成: model_code=%s model_name=%s", definition.model_code, definition.model_name)
         return chat_model

@@ -180,20 +180,16 @@ async function onRun() {
   input.value = ''
   running.value = true
 
-  // 后端 AgentRunRequest 不包含 agent_id 字段；用模板的 system_prompt/tools 注入
-  const tplCfg = agentDetail.value?.config || {}
+  // 通过 agent_id 让后端读取模板配置；这里只传本次试跑需要覆盖的字段。
   const payload = {
+    agent_id: agentId.value,
     query: userText,
     conversation_id: conversationId.value,
-    system_prompt: tplCfg.system_prompt || undefined,
-    tools: overrideTools.value.length
-      ? overrideTools.value
-      : tplCfg.tools || undefined,
+    tools: overrideTools.value.length ? overrideTools.value : undefined,
     optional_features: {
       long_term_memory_enabled: memoryEnabled.value,
     },
-    a2a: a2aEnabled.value ? tplCfg.a2a || undefined : undefined,
-    runtime_options: tplCfg.runtime_options || undefined,
+    a2a: a2aEnabled.value ? undefined : null,
   }
 
   try {
@@ -241,22 +237,12 @@ function handleStreamEvent(event: Record<string, any>, assistantIndex: number, a
     return
   }
 
-  // 工具开始和工具结果单独展示，方便试跑时确认 Agent 是否真的调用了工具。
-  if (event.type === 'tool_call_start') {
+  // messages 流中的 tool_call 表示模型发出了工具调用请求，不等同于工具执行开始或结束。
+  if (event.type === 'tool_call') {
     messages.value.push({
       role: 'tool',
       tool_name: String(data.tool_name || 'tool'),
-      content: `调用工具：${data.tool_name || 'tool'}\n参数：${safeJson(data.input)}`,
-      time: now(),
-    })
-    return
-  }
-
-  if (event.type === 'tool_call_result') {
-    messages.value.push({
-      role: 'tool',
-      tool_name: String(data.tool_name || 'tool'),
-      content: `工具返回：${safeJson(data.output)}`,
+      content: `模型请求调用工具：${data.tool_name || 'tool'}\n参数：${safeJson(data.args)}`,
       time: now(),
     })
     return

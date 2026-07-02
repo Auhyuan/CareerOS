@@ -57,6 +57,7 @@ export function getAgentRunChain(run_id: string) {
 
 /** Agent 运行请求（AgentRunRequest） */
 export interface AgentRunRequestPayload {
+  agent_id?: string | null
   query: string
   conversation_id?: string
   stream?: boolean

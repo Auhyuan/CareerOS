@@ -70,14 +70,20 @@ class AgentA2AConfig(BaseModel):
 class AgentRunRequest(BaseModel):
     """通用 Agent 真实运行请求模型。
 
-    /agent/run 是通用执行器，不绑定 agent_id。调用方如果想基于某个模板运行，
-    应先通过模板接口获取配置，再把 system_prompt、、tools、a2a、runtime_options 等配置传入本请求。
+    /agent/run 支持两种运行方式：
+    - 传 agent_id：以 Agent 模板配置为基础运行，调用方显式传入的字段作为本次覆盖。
+    - 不传 agent_id：按请求体中的临时配置直接运行。
 
     conversation_id 是会话记忆的唯一开关：
     - conversation_id 非空：作为 LangGraph thread_id，启用 PostgreSQL checkpointer，并写入用户可见会话记录。
     - conversation_id 为空：视为一次性任务或 A2A 子 Agent 调用，不启用 checkpointer，不写入 agent_conversations / agent_messages。
     """
 
+    agent_id: str | None = Field(
+        default=None,
+        max_length=100,
+        description="可选 Agent 模板 ID；传入后后端会自动加载模板配置，并允许本次请求字段覆盖模板默认值。",
+    )
     query: str = Field(..., min_length=1, description="用户输入或编排层传入的任务指令。")
     conversation_id: str | None = Field(
         default=None,
@@ -100,4 +106,13 @@ class AgentRunRequest(BaseModel):
         default_factory=ModelRuntimeOptions,
         description="模型运行参数，必须包含可用 chat 模型的 model_code。",
     )
+
+    @field_validator("agent_id")
+    @classmethod
+    def normalize_agent_id(cls, value: str | None) -> str | None:
+        """清理 Agent 模板 ID 两侧空白，空字符串视为未传。"""
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 

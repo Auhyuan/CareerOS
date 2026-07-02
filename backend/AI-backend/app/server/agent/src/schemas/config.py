@@ -18,8 +18,8 @@ class AgentFeatureConfig(BaseModel):
 class AgentBuildConfig(BaseModel):
     """Agent 装配配置。
 
-    这里不包含 agent_id，因为 /agent/run 是通用执行器。
-    如果调用方需要基于模板运行，应先通过模板接口拿到配置，再把配置传给 /agent/run。
+    这是 AgentService 解析 agent_id 模板并合并本次覆盖配置之后，
+    传给 AgentAssembler 的内部装配配置。
     """
 
     system_prompt: str | None = Field(default=None, description="系统提示词")

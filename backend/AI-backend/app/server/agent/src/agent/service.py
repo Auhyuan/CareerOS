@@ -13,9 +13,12 @@ from app.server.agent.src.model import AgentModelService
 from app.server.agent.src.prompts import AgentPromptService
 from app.server.agent.src.runtime import AgentRuntimeContext, AgentRuntimeContextService
 from app.server.agent.src.runs import AgentRunService
-from app.server.agent.src.schemas.request import AgentRunRequest
+from app.server.agent.src.schemas.request import AgentRunRequest, ModelRuntimeOptions
 from app.server.agent.src.schemas.response import AgentRunResponse
+from app.server.agent.src.templates.schemas import AgentTemplateConfig
+from app.server.agent.src.templates.service import AgentTemplateService
 from app.server.agent.src.tools import AgentToolService
+from app.server.agent.src.agent.streaming import AgentStreamEventParser
 
 
 logger = logging.getLogger("ai_backend.agent")
@@ -44,6 +47,8 @@ class AgentService:
         checkpoint_service: AgentCheckpointService | None = None,
         context_service: AgentContextService | None = None,
         run_service: AgentRunService | None = None,
+        template_service: AgentTemplateService | None = None,
+        stream_parser: AgentStreamEventParser | None = None,
     ):
         """初始化平台通用 Agent 服务。
 
@@ -58,6 +63,8 @@ class AgentService:
             checkpoint_service: Checkpointer 服务（同上）。
             context_service: 历史会话服务，负责读写 agent_conversations 和 agent_messages。
             run_service: Agent 主运行记录服务，负责读写 agent_runs。
+            template_service: Agent 模板服务，负责按 agent_id 加载模板配置。
+            stream_parser: 流式消息解析器，负责把 LangGraph messages 分片转成 SSE 事件。
         """
         self.assembler = assembler or AgentAssembler(
             model_service=model_service or AgentModelService(),
@@ -71,6 +78,8 @@ class AgentService:
         self.memory_service = memory_service or AgentMemoryService()
         self.context_service = context_service or AgentContextService()
         self.run_service = run_service or AgentRunService()
+        self.template_service = template_service or AgentTemplateService()
+        self.stream_parser = stream_parser or AgentStreamEventParser()
 
         # 向后兼容：API 层通过 agent_service.tool_service 访问工具列表。
         self.tool_service = self.assembler.tool_service
@@ -91,6 +100,77 @@ class AgentService:
         if not title:
             return "新会话"
         return title[:255]
+
+    def _resolve_template_request(self, request: AgentRunRequest, db: Session | None) -> AgentRunRequest:
+        """根据 agent_id 加载模板配置，并合并本次请求的覆盖字段。
+
+        Args:
+            request: API 或内部调用传入的原始运行请求。
+            db: PostgreSQL Session；API 调用场景会传入，A2A 等内部场景可能为空。
+
+        Returns:
+            合并模板后的 AgentRunRequest；未传 agent_id 时原样返回。
+        """
+        if not request.agent_id:
+            return request
+
+        template_config = self._load_template_config(request.agent_id, db)
+        request_fields = request.model_fields_set
+        update_data = {
+            "system_prompt": request.system_prompt
+            if "system_prompt" in request_fields and request.system_prompt is not None
+            else template_config.system_prompt,
+            "tools": list(request.tools) if "tools" in request_fields else list(template_config.tools or []),
+            "optional_features": request.optional_features
+            if "optional_features" in request_fields
+            else template_config.optional_features,
+            "a2a": request.a2a if "a2a" in request_fields else template_config.a2a,
+            "runtime_options": self._merge_runtime_options(template_config.runtime_options, request.runtime_options),
+        }
+        return request.model_copy(update=update_data, deep=True)
+
+    def _load_template_config(self, agent_id: str, db: Session | None) -> AgentTemplateConfig:
+        """按 agent_id 查询启用中的 Agent 模板配置。
+
+        Args:
+            agent_id: Agent 模板 ID。
+            db: PostgreSQL Session；为空时临时打开只读会话。
+
+        Returns:
+            AgentTemplateConfig 模板配置。
+        """
+        if db is not None:
+            template = self.template_service.get_template(db, agent_id)
+        else:
+            from app.common.db.postgres_db import get_db_session
+
+            with get_db_session() as inner_db:
+                template = self.template_service.get_template(inner_db, agent_id)
+
+        if template is None:
+            raise RuntimeError(f"Agent 模板不存在: {agent_id}")
+        if template.status != "active":
+            raise RuntimeError(f"Agent 模板未启用: {agent_id}")
+        return template.config
+
+    def _merge_runtime_options(
+        self,
+        template_options: ModelRuntimeOptions,
+        request_options: ModelRuntimeOptions,
+    ) -> ModelRuntimeOptions:
+        """按字段合并模板模型参数和本次请求模型参数。
+
+        Args:
+            template_options: 模板默认模型运行参数。
+            request_options: 本次请求传入的模型运行参数。
+
+        Returns:
+            合并后的模型运行参数。
+        """
+        merged = template_options.model_dump(mode="python")
+        for field_name in request_options.model_fields_set:
+            merged[field_name] = getattr(request_options, field_name)
+        return ModelRuntimeOptions(**merged)
 
     def _prepare_run_context(
         self,
@@ -138,7 +218,9 @@ class AgentService:
                 conversation_id=context.thread_id if request.conversation_id else None,
                 user_message_id=user_message_id,
                 query=request.query,
+                agent_id=request.agent_id,
                 metadata={
+                    "agent_id": request.agent_id,
                     "model_code": request.runtime_options.model_code,
                     "tools": request.tools,
                     "a2a_sub_agent_list": request.a2a.sub_agent_list if request.a2a else [],
@@ -236,11 +318,14 @@ class AgentService:
         """
         run_started_at = time.perf_counter()
 
-        # 第一步：构建上下文、写入用户消息，并创建 agent_runs 主运行记录。
+        # 第一步：如果传入 agent_id，先加载模板并合并本次运行覆盖配置。
+        request = self._resolve_template_request(request, db)
+
+        # 第二步：构建上下文、写入用户消息，并创建 agent_runs 主运行记录。
         context, context_enabled, run_record_enabled = self._prepare_run_context(request, db)
 
         try:
-            # 第二步：组装 Agent。这里会加载模型、工具、中间件、结构化输出和 checkpointer。
+            # 第三步：组装 Agent。这里会加载模型、工具、中间件和 checkpointer。
             assembly = await self.assembler.assemble(request, context, db)
         except Exception as error:
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
@@ -340,7 +425,10 @@ class AgentService:
         """
         run_started_at = time.perf_counter()
 
-        # 第一步：构建上下文、写入用户消息，并创建 agent_runs 主运行记录。
+        # 第一步：如果传入 agent_id，先加载模板并合并本次运行覆盖配置。
+        request = self._resolve_template_request(request, db)
+
+        # 第二步：构建上下文、写入用户消息，并创建 agent_runs 主运行记录。
         context, context_enabled, run_record_enabled = self._prepare_run_context(request, db)
         yield {
             "type": "run_start",
@@ -353,7 +441,7 @@ class AgentService:
         }
 
         try:
-            # 第二步：组装 Agent。这里会加载模型、工具、中间件、结构化输出和 checkpointer。
+            # 第三步：组装 Agent。这里会加载模型、工具、中间件和 checkpointer。
             assembly = await self.assembler.assemble(request, context, db)
             yield {
                 "type": "agent_assembled",
@@ -368,23 +456,21 @@ class AgentService:
             invoke_config = {"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50}
             final_result: dict[str, Any] | None = None
 
-            # 第四步：消费 LangChain/LangGraph 事件流，并转换成平台统一事件。
-            async for raw_event in assembly.agent.astream_events(
+            # 第四步：消费 LangGraph messages 流。
+            # messages 模式更贴近模型输出本身，适合直接区分 reasoning_content 和 content，
+            # 前端也不需要接收完整 LangChain 事件流。
+            async for chunk in assembly.agent.astream(
                 {"messages": input_messages},
                 config=invoke_config,
                 context=context.to_langchain_context(),
-                version="v2",
+                stream_mode="messages",
             ):
-                normalized_event = self._normalize_stream_event(raw_event)
-                if normalized_event is not None:
+                for normalized_event in self.stream_parser.normalize_message_stream_chunk(chunk):
                     yield normalized_event
 
-                output = self._extract_stream_output(raw_event)
-                if output is not None:
-                    final_result = output
-
-            # 第五步：提取最终回答和结构化输出。
-            answer = self._extract_answer_from_result(final_result or {})
+            # 第五步：流式 token 已经推送完成；再执行一次轻量读取，拿到最终 state 用于持久化最终回答。
+            final_result = await assembly.agent.aget_state(invoke_config)
+            answer = self._extract_answer_from_result(self.stream_parser.safe_event_value(final_result.values))
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             await self._finalize_run(
                 context,
@@ -434,87 +520,7 @@ class AgentService:
                     "error_type": error.__class__.__name__,
                 },
             }
-    # ── 流事件解析 ──────────────────────────────────────────────
-
-    @staticmethod
-    def _safe_event_value(obj: Any) -> Any:
-        """把 LangChain 内部对象（Command、ToolMessage 等）转为安全的 dict/str。"""
-        if obj is None or isinstance(obj, (str, int, float, bool)):
-            return obj
-        if isinstance(obj, dict):
-            return {k: AgentService._safe_event_value(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [AgentService._safe_event_value(v) for v in obj]
-        if hasattr(obj, "model_dump"):
-            return AgentService._safe_event_value(obj.model_dump())
-        if hasattr(obj, "dict") and callable(obj.dict):
-            return AgentService._safe_event_value(obj.dict())
-        return str(obj)
-
-    def _normalize_stream_event(self, raw_event: dict[str, Any]) -> dict[str, Any] | None:
-        """将 LangChain 原始流事件转换为平台 SSE 事件。
-
-        Args:
-            raw_event: LangChain/LangGraph astream_events 产出的原始事件。
-
-        Returns:
-            可序列化的平台事件；无法映射或不需要暴露时返回 None。
-        """
-        event_name = raw_event.get("event")
-        runnable_name = raw_event.get("name")
-        data = raw_event.get("data") or {}
-
-        if event_name == "on_chat_model_start":
-            return {"type": "model_start", "data": {"name": runnable_name}}
-
-        if event_name == "on_chat_model_stream":
-            chunk = data.get("chunk")
-            reasoning = self._extract_reasoning_text(chunk)
-            content = self._extract_message_text(chunk)
-            if reasoning:
-                return {"type": "reasoning_delta", "data": {"content": reasoning}}
-            if content:
-                return {"type": "model_delta", "data": {"content": content}}
-            return None
-
-        if event_name == "on_chat_model_end":
-            return {"type": "model_end", "data": {"name": runnable_name}}
-
-        if event_name == "on_tool_start":
-            return {
-                "type": "tool_call_start",
-                "data": {
-                    "tool_name": runnable_name,
-                    "input": self._safe_event_value(data.get("input")),
-                },
-            }
-
-        if event_name == "on_tool_end":
-            return {
-                "type": "tool_call_result",
-                "data": {
-                    "tool_name": runnable_name,
-                    "output": self._safe_event_value(data.get("output")),
-                },
-            }
-
-        return None
-
-    def _extract_stream_output(self, raw_event: dict[str, Any]) -> dict[str, Any] | None:
-        """从原始流事件中提取可能的最终 Agent 输出。
-
-        Args:
-            raw_event: LangChain/LangGraph astream_events 产出的原始事件。
-
-        Returns:
-        """
-        if raw_event.get("event") != "on_chain_end":
-            return None
-
-        output = (raw_event.get("data") or {}).get("output")
-        if isinstance(output, dict) and "messages" in output:
-            return output
-        return None
+    # ── 结果提取 ────────────────────────────────────────────────
 
     def _extract_answer_from_result(self, result: dict[str, Any]) -> str:
         """从 Agent 最终结果中提取最终文本回答。
@@ -528,28 +534,19 @@ class AgentService:
         messages = result.get("messages") or []
         if not messages:
             return ""
-        content = getattr(messages[-1], "content", "")
-        return content if isinstance(content, str) else str(content)
 
+        last_message = messages[-1]
+        # final_result.values 经过 safe_event_value 后，LangChain 消息对象会变成 dict；
+        # 非流式路径里仍可能是原始消息对象，所以这里两种形态都要兼容。
+        if isinstance(last_message, dict):
+            content = last_message.get("content", "")
+        else:
+            content = getattr(last_message, "content", "")
 
-    def _extract_message_text(self, message: Any) -> str:
-        """从模型消息或消息分片中提取普通文本。
-
-        Args:
-            message: LangChain 消息对象、消息分片或原生字符串。
-
-        Returns:
-            提取出的文本；没有文本时返回空字符串。
-        """
-        if message is None:
-            return ""
-        if isinstance(message, str):
-            return message
-
-        content = getattr(message, "content", "")
         if isinstance(content, str):
             return content
         if isinstance(content, list):
+            # 兼容多模态 / reasoning block 形态，只抽取可展示文本。
             parts: list[str] = []
             for item in content:
                 if isinstance(item, str):
@@ -557,38 +554,4 @@ class AgentService:
                 elif isinstance(item, dict) and item.get("type") in {"text", "output_text"}:
                     parts.append(str(item.get("text") or item.get("content") or ""))
             return "".join(parts)
-        return ""
-
-    def _extract_reasoning_text(self, message: Any) -> str:
-        """从模型消息分片中提取供应商返回的思考内容。
-
-        Args:
-            message: LangChain 消息对象或消息分片。
-
-        Returns:
-            模型供应商显式返回的 reasoning 文本；不支持时返回空字符串。
-        """
-        if message is None:
-            return ""
-
-        additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
-        for key in ("reasoning_content", "reasoning", "reasoning_text"):
-            value = additional_kwargs.get(key)
-            if isinstance(value, str) and value:
-                return value
-
-        response_metadata = getattr(message, "response_metadata", {}) or {}
-        for key in ("reasoning_content", "reasoning", "reasoning_text"):
-            value = response_metadata.get(key)
-            if isinstance(value, str) and value:
-                return value
-
-        content = getattr(message, "content", None)
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, dict) and item.get("type") in {"reasoning", "thinking"}:
-                    parts.append(str(item.get("text") or item.get("content") or ""))
-            return "".join(parts)
-        return ""
-
+        return str(content) if content is not None else ""
