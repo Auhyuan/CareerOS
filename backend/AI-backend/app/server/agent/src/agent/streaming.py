@@ -25,7 +25,24 @@ class AgentStreamEventParser:
         if message is None:
             return []
 
+        self.log_raw_stream_chunk(message, metadata)
+
         events: list[dict[str, Any]] = []
+
+        # ToolMessage 是工具执行完成后的返回结果，不是模型自然语言输出。
+        # 如果把它当成 model_delta，前端会误以为工具 JSON 是 Agent 正文。
+        if self.is_tool_message(message):
+            tool_result = self.extract_tool_result(message)
+            if tool_result is not None:
+                events.append({
+                    "type": "tool_result",
+                    "data": {
+                        **tool_result,
+                        "metadata": self.safe_event_value(metadata),
+                    },
+                })
+            return events
+
         reasoning = self.extract_reasoning_text(message)
         content = self.extract_message_text(message)
 
@@ -70,6 +87,27 @@ class AgentStreamEventParser:
         return chunk, None
 
 
+    def log_raw_stream_chunk(self, message: Any, metadata: Any) -> None:
+        """在 DEBUG 级别打印 LangGraph messages 原始分片。
+
+        Args:
+            message: LangGraph messages 流返回的消息对象。
+            metadata: LangGraph messages 流返回的元数据。
+        """
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+
+        safe_message = self.safe_event_value(message)
+        safe_metadata = self.safe_event_value(metadata)
+        logger.debug(
+            "原始流式分片: message_class=%s message_type=%s message=%s metadata=%s",
+            message.__class__.__name__,
+            getattr(message, "type", None),
+            safe_message,
+            safe_metadata,
+        )
+
+
     def log_reasoning_debug(self, message: Any) -> None:
         """在调试级别记录消息分片中的 reasoning 相关字段位置。
 
@@ -89,24 +127,119 @@ class AgentStreamEventParser:
             type(content).__name__,
         )
 
+    def is_tool_message(self, message: Any) -> bool:
+        """判断当前分片是否为工具返回消息。
+
+        Args:
+            message: LangChain 消息对象或消息字典。
+
+        Returns:
+            是工具返回消息时返回 True，否则返回 False。
+        """
+        if isinstance(message, dict):
+            return message.get("type") == "tool"
+        return getattr(message, "type", None) == "tool" or message.__class__.__name__ == "ToolMessage"
+
+    def extract_tool_result(self, message: Any) -> dict[str, Any] | None:
+        """从 ToolMessage 中提取工具返回结果。
+
+        Args:
+            message: LangChain ToolMessage 对象或序列化后的消息字典。
+
+        Returns:
+            工具结果事件数据；不是工具消息时返回 None。
+        """
+        if not self.is_tool_message(message):
+            return None
+
+        if isinstance(message, dict):
+            tool_name = message.get("name")
+            tool_call_id = message.get("tool_call_id")
+            artifact = message.get("artifact")
+            content = message.get("content")
+        else:
+            tool_name = getattr(message, "name", None)
+            tool_call_id = getattr(message, "tool_call_id", None)
+            artifact = getattr(message, "artifact", None)
+            content = getattr(message, "content", None)
+
+        # MCP / LangChain 工具可能把结构化结果放在 artifact.structured_content。
+        # 优先返回结构化内容，方便前端调试面板直接渲染；没有时再退回 content 文本。
+        output = None
+        if isinstance(artifact, dict):
+            output = artifact.get("structured_content") or artifact.get("data") or artifact
+        if output is None:
+            output = self.extract_content_value(content)
+
+        return {
+            "tool_name": tool_name or "tool",
+            "tool_call_id": tool_call_id,
+            "output": self.safe_event_value(output),
+        }
+
     def extract_tool_calls(self, message: Any) -> list[dict[str, Any]]:
-        """从消息分片中提取模型发出的工具调用。
+        """从消息分片中提取模型发出的完整工具调用。
 
         Args:
             message: LangChain 消息对象或消息分片。
 
         Returns:
-            工具调用字典列表；没有工具调用时返回空列表。
+            工具调用字典列表；没有完整工具调用时返回空列表。
         """
-        tool_calls = getattr(message, "tool_calls", None) or []
-        if tool_calls:
-            return [item for item in tool_calls if isinstance(item, dict)]
+        raw_candidates: list[Any] = []
+        if isinstance(message, dict):
+            raw_candidates.extend(message.get("tool_calls") or [])
+            additional_kwargs = message.get("additional_kwargs") or {}
+        else:
+            raw_candidates.extend(getattr(message, "tool_calls", None) or [])
+            additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
 
-        additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
-        raw_calls = additional_kwargs.get("tool_calls") or []
-        if isinstance(raw_calls, list):
-            return [item for item in raw_calls if isinstance(item, dict)]
-        return []
+        raw_candidates.extend(additional_kwargs.get("tool_calls") or [])
+
+        tool_calls: list[dict[str, Any]] = []
+        seen_keys: set[tuple[str | None, str, str]] = set()
+        for item in raw_candidates:
+            normalized = self.normalize_tool_call(item)
+            if normalized is None:
+                continue
+            # 同一个工具调用可能同时出现在 message.tool_calls 和 additional_kwargs.tool_calls，按稳定 key 去重。
+            dedupe_key = (normalized.get("id"), str(normalized.get("name")), str(normalized.get("args")))
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            tool_calls.append(normalized)
+        return tool_calls
+
+    def normalize_tool_call(self, item: Any) -> dict[str, Any] | None:
+        """把 LangChain 工具调用对象归一化为前端可展示的完整工具调用。
+
+        Args:
+            item: LangChain 返回的工具调用字典。
+
+        Returns:
+            完整工具调用字典；如果只是 tool_call_chunks 参数碎片则返回 None。
+        """
+        if not isinstance(item, dict):
+            return None
+
+        name = item.get("name") or item.get("tool_name")
+        args = item.get("args") if "args" in item else item.get("input")
+        call_id = item.get("id")
+
+        # tool_call_chunks 的 args 常常是字符串碎片，例如 "{", "\"name\": ..."。
+        # 这类内容不是完整工具调用，前端不应该展示为工具卡片。
+        if not isinstance(name, str) or not name.strip() or name == "tool":
+            return None
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            return None
+
+        return {
+            "name": name.strip(),
+            "args": args,
+            "id": call_id,
+        }
 
     def extract_message_text(self, message: Any) -> str:
         """从模型消息或消息分片中提取普通文本。
@@ -126,17 +259,46 @@ class AgentStreamEventParser:
             content = message.get("content", "")
         else:
             content = getattr(message, "content", "")
+        return self.extract_content_text(content)
+
+    def extract_content_text(self, content: Any) -> str:
+        """从 LangChain content 字段中提取可展示文本。
+
+        Args:
+            content: 消息 content，可能是字符串或内容块列表。
+
+        Returns:
+            拼接后的文本内容；没有文本时返回空字符串。
+        """
+        value = self.extract_content_value(content)
+        return value if isinstance(value, str) else ""
+
+    def extract_content_value(self, content: Any) -> Any:
+        """从 LangChain content 字段中提取原始值。
+
+        Args:
+            content: 消息 content，可能是字符串或内容块列表。
+
+        Returns:
+            字符串、列表或字典形式的内容值。
+        """
         if isinstance(content, str):
             return content
         if isinstance(content, list):
             parts: list[str] = []
+            values: list[Any] = []
             for item in content:
                 if isinstance(item, str):
                     parts.append(item)
-                elif isinstance(item, dict) and item.get("type") in {"text", "output_text"}:
-                    parts.append(str(item.get("text") or item.get("content") or ""))
-            return "".join(parts)
-        return ""
+                    continue
+                if isinstance(item, dict) and item.get("type") in {"text", "output_text"}:
+                    text = item.get("text") or item.get("content") or ""
+                    parts.append(str(text))
+                    values.append(item)
+            if parts:
+                return "".join(parts)
+            return values or content
+        return content
 
     def extract_reasoning_text(self, message: Any) -> str:
         """从模型消息分片中提取供应商返回的思考内容。

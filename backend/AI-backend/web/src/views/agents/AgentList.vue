@@ -68,7 +68,7 @@
           <template v-else-if="column.dataIndex === 'action'">
             <a-space>
               <a-button type="link" size="small" @click="router.push(`/agents/${record.agent_id}/edit`)">编辑</a-button>
-              <a-button type="link" size="small" @click="router.push(`/agents/${record.agent_id}/playground`)">试跑</a-button>
+              <a-button type="link" size="small" @click="router.push({ path: '/agent-invoke', query: { agent_id: record.agent_id } })">调用</a-button>
               <a-popconfirm title="确认删除该 Agent 模板？" @confirm="onDelete(record.agent_id)">
                 <a-button type="link" size="small" danger>删除</a-button>
               </a-popconfirm>

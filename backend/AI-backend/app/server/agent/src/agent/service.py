@@ -102,7 +102,7 @@ class AgentService:
         return title[:255]
 
     def _resolve_template_request(self, request: AgentRunRequest, db: Session | None) -> AgentRunRequest:
-        """根据 agent_id 加载模板配置，并合并本次请求的覆盖字段。
+        """根据 agent_id 加载模板配置，并按“模板优先”规则合并本次请求。
 
         Args:
             request: API 或内部调用传入的原始运行请求。
@@ -115,17 +115,17 @@ class AgentService:
             return request
 
         template_config = self._load_template_config(request.agent_id, db)
-        request_fields = request.model_fields_set
         update_data = {
-            "system_prompt": request.system_prompt
-            if "system_prompt" in request_fields and request.system_prompt is not None
-            else template_config.system_prompt,
-            "tools": list(request.tools) if "tools" in request_fields else list(template_config.tools or []),
-            "optional_features": request.optional_features
-            if "optional_features" in request_fields
-            else template_config.optional_features,
-            "a2a": request.a2a if "a2a" in request_fields else template_config.a2a,
-            "runtime_options": self._merge_runtime_options(template_config.runtime_options, request.runtime_options),
+            # 传入 agent_id 后，模板中的核心装配配置拥有最高优先级。
+            # 请求体里的 system_prompt=""、tools=[] 只表示前端表单默认值，不能覆盖模板。
+            "system_prompt": template_config.system_prompt or request.system_prompt,
+            "tools": list(template_config.tools or request.tools or []),
+            "optional_features": template_config.optional_features or request.optional_features,
+            "a2a": template_config.a2a if template_config.a2a is not None else request.a2a,
+            "runtime_options": self._resolve_template_runtime_options(
+                template_config.runtime_options,
+                request.runtime_options,
+            ),
         }
         return request.model_copy(update=update_data, deep=True)
 
@@ -153,23 +153,25 @@ class AgentService:
             raise RuntimeError(f"Agent 模板未启用: {agent_id}")
         return template.config
 
-    def _merge_runtime_options(
+    def _resolve_template_runtime_options(
         self,
         template_options: ModelRuntimeOptions,
         request_options: ModelRuntimeOptions,
     ) -> ModelRuntimeOptions:
-        """按字段合并模板模型参数和本次请求模型参数。
+        """按“模板优先”规则确定模型运行参数。
 
         Args:
             template_options: 模板默认模型运行参数。
             request_options: 本次请求传入的模型运行参数。
 
         Returns:
-            合并后的模型运行参数。
+            合并后的模型运行参数；模板缺少 model_code 时才使用请求体兜底。
         """
+        # 模型选择属于 Agent 模板的核心能力配置，不能被请求体中的空值或临时字段覆盖。
+        # 只有模板没有绑定模型时，才允许使用请求体里的 model_code 作为兜底，便于临时模板测试。
         merged = template_options.model_dump(mode="python")
-        for field_name in request_options.model_fields_set:
-            merged[field_name] = getattr(request_options, field_name)
+        if not merged.get("model_code") and request_options.model_code:
+            merged["model_code"] = request_options.model_code
         return ModelRuntimeOptions(**merged)
 
     def _prepare_run_context(
@@ -454,11 +456,12 @@ class AgentService:
             # 第三步：只传入本轮用户消息；跨轮 Agent 记忆由 checkpointer 根据 thread_id 恢复。
             input_messages = [{"role": "user", "content": request.query}]
             invoke_config = {"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50}
-            final_result: dict[str, Any] | None = None
+            answer_parts: list[str] = []
 
             # 第四步：消费 LangGraph messages 流。
-            # messages 模式更贴近模型输出本身，适合直接区分 reasoning_content 和 content，
-            # 前端也不需要接收完整 LangChain 事件流。
+            # messages 模式更贴近模型输出本身，适合直接区分 reasoning_content 和 content。
+            # 流式模式下前端已经实时收到了 model_delta，因此接口末尾不再额外发送 final 事件；
+            # 这里仅在后端累计正文 token，用于写入 agent_messages / agent_runs。
             async for chunk in assembly.agent.astream(
                 {"messages": input_messages},
                 config=invoke_config,
@@ -466,11 +469,15 @@ class AgentService:
                 stream_mode="messages",
             ):
                 for normalized_event in self.stream_parser.normalize_message_stream_chunk(chunk):
+                    if normalized_event.get("type") == "model_delta":
+                        content = (normalized_event.get("data") or {}).get("content")
+                        if isinstance(content, str) and content:
+                            answer_parts.append(content)
                     yield normalized_event
 
-            # 第五步：流式 token 已经推送完成；再执行一次轻量读取，拿到最终 state 用于持久化最终回答。
-            final_result = await assembly.agent.aget_state(invoke_config)
-            answer = self._extract_answer_from_result(self.stream_parser.safe_event_value(final_result.values))
+            # 第五步：流式 token 已经全部推送完成，使用累计正文作为最终回答。
+            # 这里不能调用 aget_state()，因为无状态运行不会挂 checkpointer，调用会触发 No checkpointer set。
+            answer = "".join(answer_parts)
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             await self._finalize_run(
                 context,
@@ -482,18 +489,12 @@ class AgentService:
             )
 
             yield {
-                "type": "final",
-                "data": {
-                    "run_id": context.run_id,
-                    "answer": answer,
-                },
-            }
-            yield {
                 "type": "run_end",
                 "data": {
                     "run_id": context.run_id,
                     "thread_id": context.thread_id,
                     "elapsed_ms": elapsed_ms,
+                    "answer_length": len(answer),
                 },
             }
         except Exception as error:

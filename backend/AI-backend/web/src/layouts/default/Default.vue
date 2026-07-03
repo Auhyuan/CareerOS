@@ -60,6 +60,7 @@ import {
   SettingOutlined,
   ApartmentOutlined,
   BookOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons-vue'
 
 defineOptions({ name: 'DefaultLayout' })
@@ -81,6 +82,7 @@ interface MenuItem {
 const menuItems = ref<MenuItem[]>([
   { path: '/', title: 'Dashboard', icon: DashboardOutlined, group: '概览' },
   { path: '/agents', title: 'Agent 模板', icon: RobotOutlined, group: 'Agent 管理' },
+  { path: '/agent-invoke', title: 'Agent 调用', icon: PlayCircleOutlined, group: 'Agent 管理' },
   { path: '/conversations', title: '会话历史', icon: MessageOutlined, group: '会话' },
   { path: '/runs', title: '运行监控', icon: LineChartOutlined, group: '监控' },
   { path: '/tools', title: '工具管理', icon: ToolOutlined, group: '运维' },

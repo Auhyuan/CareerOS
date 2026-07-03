@@ -71,7 +71,7 @@ class AgentRunRequest(BaseModel):
     """通用 Agent 真实运行请求模型。
 
     /agent/run 支持两种运行方式：
-    - 传 agent_id：以 Agent 模板配置为基础运行，调用方显式传入的字段作为本次覆盖。
+    - 传 agent_id：以 Agent 模板配置为主运行，请求体只提供 query、conversation_id、stream 等本次调用参数。
     - 不传 agent_id：按请求体中的临时配置直接运行。
 
     conversation_id 是会话记忆的唯一开关：
@@ -82,7 +82,7 @@ class AgentRunRequest(BaseModel):
     agent_id: str | None = Field(
         default=None,
         max_length=100,
-        description="可选 Agent 模板 ID；传入后后端会自动加载模板配置，并允许本次请求字段覆盖模板默认值。",
+        description="可选 Agent 模板 ID；传入后后端会自动加载模板配置，并以模板中的核心配置为主。",
     )
     query: str = Field(..., min_length=1, description="用户输入或编排层传入的任务指令。")
     conversation_id: str | None = Field(

@@ -44,12 +44,19 @@ const routes = [
     component: () => import('@/views/agents/AgentEdit.vue'),
     meta: { layout: 'default', title: '编辑 Agent' },
   },
-  // 4. Agent Playground 试跑台
+  // 4. Agent Playground 试跑台（重定向到新调用页）
   {
     path: '/agents/:agent_id/playground',
     name: 'AgentPlayground',
-    component: () => import('@/views/agents/AgentPlayground.vue'),
+    redirect: (to) => ({ path: '/agent-invoke', query: { agent_id: to.params.agent_id } }),
     meta: { layout: 'default', title: 'Playground' },
+  },
+  // 4.1 Agent 调用页
+  {
+    path: '/agent-invoke',
+    name: 'AgentInvoke',
+    component: () => import('@/views/agents/AgentInvoke.vue'),
+    meta: { layout: 'default', title: 'Agent 调用' },
   },
   // 5. 会话历史列表
   {
