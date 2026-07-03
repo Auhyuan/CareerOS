@@ -118,6 +118,42 @@ class AgentRunService:
         db.refresh(row)
         return row
 
+    def mark_interrupted(
+        self,
+        db: Session,
+        *,
+        run_id: str,
+        interrupt_type: str | None = None,
+        interrupt_payload: dict[str, Any] | None = None,
+        elapsed_ms: float,
+    ) -> AgentRun | None:
+        """把 Agent 运行记录标记为中断等待用户输入。
+
+        Args:
+            db: PostgreSQL Session。
+            run_id: 本次 Agent 运行 ID。
+            interrupt_type: 中断类型，例如 plan_confirmation。
+            interrupt_payload: 返回给前端的中断 payload。
+            elapsed_ms: 中断发生前耗时，单位毫秒。
+
+        Returns:
+            更新后的 AgentRun；记录不存在时返回 None。
+        """
+        row = self.get_by_run_id(db, run_id)
+        if row is None:
+            return None
+        metadata = dict(row.extra_metadata or {})
+        metadata["interrupt_type"] = interrupt_type
+        metadata["interrupt_payload"] = interrupt_payload or {}
+        row.status = "interrupted"
+        row.error_message = None
+        row.elapsed_ms = elapsed_ms
+        row.extra_metadata = metadata
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
 
     def _to_view(self, row: AgentRun) -> AgentRunView:
         """把数据库运行记录模型转换为接口返回视图。

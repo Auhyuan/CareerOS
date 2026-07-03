@@ -458,27 +458,62 @@ class AgentService:
             invoke_config = {"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50}
             answer_parts: list[str] = []
 
-            # 第四步：消费 LangGraph messages 流。
-            # messages 模式更贴近模型输出本身，适合直接区分 reasoning_content 和 content。
+            # 第四步：同时消费 messages 和 updates 流。
+            # - messages：模型 token、reasoning、工具调用等前端实时内容。
+            # - updates：LangGraph interrupt 只会在 updates 中出现，单独使用 messages 会丢失中断事件。
             # 流式模式下前端已经实时收到了 model_delta，因此接口末尾不再额外发送 final 事件；
             # 这里仅在后端累计正文 token，用于写入 agent_messages / agent_runs。
-            async for chunk in assembly.agent.astream(
+            interrupted_payload: dict[str, Any] | None = None
+            async for stream_chunk in assembly.agent.astream(
                 {"messages": input_messages},
                 config=invoke_config,
                 context=context.to_langchain_context(),
-                stream_mode="messages",
+                stream_mode=["messages", "updates"],
             ):
-                for normalized_event in self.stream_parser.normalize_message_stream_chunk(chunk):
-                    if normalized_event.get("type") == "model_delta":
-                        content = (normalized_event.get("data") or {}).get("content")
-                        if isinstance(content, str) and content:
-                            answer_parts.append(content)
-                    yield normalized_event
+                stream_mode, chunk = stream_chunk if isinstance(stream_chunk, tuple) and len(stream_chunk) == 2 else ("messages", stream_chunk)
+
+                if stream_mode == "messages":
+                    for normalized_event in self.stream_parser.normalize_message_stream_chunk(chunk):
+                        if normalized_event.get("type") == "model_delta":
+                            content = (normalized_event.get("data") or {}).get("content")
+                            if isinstance(content, str) and content:
+                                answer_parts.append(content)
+                        yield normalized_event
+                    continue
+
+                if stream_mode == "updates":
+                    interrupt_event = self._extract_interrupt_event(chunk, context.run_id, context.thread_id)
+                    if interrupt_event is not None:
+                        interrupted_payload = (interrupt_event.get("data") or {}).get("payload")
+                        yield interrupt_event
+
+            elapsed_ms = (time.perf_counter() - run_started_at) * 1000
+            if interrupted_payload is not None:
+                interrupt_type = str(interrupted_payload.get("type") or "unknown") if isinstance(interrupted_payload, dict) else "unknown"
+                if run_record_enabled and db is not None:
+                    self.run_service.mark_interrupted(
+                        db,
+                        run_id=context.run_id,
+                        interrupt_type=interrupt_type,
+                        interrupt_payload=interrupted_payload,
+                        elapsed_ms=elapsed_ms,
+                    )
+                yield {
+                    "type": "run_end",
+                    "data": {
+                        "run_id": context.run_id,
+                        "thread_id": context.thread_id,
+                        "status": "interrupted",
+                        "interrupt_type": interrupt_type,
+                        "elapsed_ms": elapsed_ms,
+                        "answer_length": len("".join(answer_parts)),
+                    },
+                }
+                return
 
             # 第五步：流式 token 已经全部推送完成，使用累计正文作为最终回答。
             # 这里不能调用 aget_state()，因为无状态运行不会挂 checkpointer，调用会触发 No checkpointer set。
             answer = "".join(answer_parts)
-            elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             await self._finalize_run(
                 context,
                 answer,
@@ -493,6 +528,7 @@ class AgentService:
                 "data": {
                     "run_id": context.run_id,
                     "thread_id": context.thread_id,
+                    "status": "success",
                     "elapsed_ms": elapsed_ms,
                     "answer_length": len(answer),
                 },
@@ -521,6 +557,47 @@ class AgentService:
                     "error_type": error.__class__.__name__,
                 },
             }
+
+    def _extract_interrupt_event(
+        self,
+        chunk: Any,
+        run_id: str,
+        thread_id: str,
+    ) -> dict[str, Any] | None:
+        """从 LangGraph updates 分片中提取 interrupt 事件。
+
+        Args:
+            chunk: LangGraph updates 模式返回的分片。
+            run_id: 当前 Agent 运行 ID。
+            thread_id: 当前 LangGraph thread ID。
+
+        Returns:
+            可直接返回给前端的 interrupt 事件；没有中断时返回 None。
+        """
+        if not isinstance(chunk, dict):
+            return None
+        interrupts = chunk.get("__interrupt__")
+        if not interrupts:
+            return None
+
+        first_interrupt = interrupts[0] if isinstance(interrupts, (list, tuple)) else interrupts
+        if isinstance(first_interrupt, dict) and "value" in first_interrupt:
+            payload = first_interrupt.get("value")
+        else:
+            payload = getattr(first_interrupt, "value", first_interrupt)
+        safe_payload = self.stream_parser.safe_event_value(payload)
+        if not isinstance(safe_payload, dict):
+            safe_payload = {"type": "unknown", "data": {"value": safe_payload}}
+
+        return {
+            "type": "interrupt",
+            "data": {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "payload": safe_payload,
+            },
+        }
+
     # ── 结果提取 ────────────────────────────────────────────────
 
     def _extract_answer_from_result(self, result: dict[str, Any]) -> str:
