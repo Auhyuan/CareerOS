@@ -82,6 +82,7 @@ class AgentAssembler:
         # 第一步：从请求中直接构建内部装配配置（不再通过中间方法包装）。
         features = AgentFeatureConfig(
             enable_memory=request.optional_features.long_term_memory_enabled,
+            enable_planning=request.optional_features.planning_enabled,
         )
         build_config = AgentBuildConfig(
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
@@ -90,9 +91,10 @@ class AgentAssembler:
             features=features,
         )
         logger.info(
-            "Agent 构建配置就绪: thread_id=%s memory=%s",
+            "Agent 构建配置就绪: thread_id=%s memory=%s planning=%s",
             context.thread_id,
             features.enable_memory,
+            features.enable_planning,
         )
 
         # 第二步：渲染系统提示词。
@@ -116,6 +118,16 @@ class AgentAssembler:
             len(tools),
             [getattr(tool, "name", tool.__class__.__name__) for tool in tools],
         )
+
+        # 第三步附加：规划工具动态注入。
+        # planning_enabled 是能力开关，开启后自动给 Agent 装配任务计划工具，避免前端重复维护 tools 白名单。
+        if features.enable_planning:
+            from app.server.agent.src.tools.planning_tools import set_task_plan, update_task_step
+
+            existing_tool_names = {getattr(tool, "name", tool.__class__.__name__) for tool in tools}
+            for planning_tool in [set_task_plan, update_task_step]:
+                if getattr(planning_tool, "name", "") not in existing_tool_names:
+                    tools.append(planning_tool)
 
         # 第三步附加：A2A 工具动态注入。仅 a2a.sub_agent_list 非空时装配 a2a_call 工具。
         # 子 Agent 元信息查询和 system prompt 注入由 A2AAgentContextMiddleware 负责。

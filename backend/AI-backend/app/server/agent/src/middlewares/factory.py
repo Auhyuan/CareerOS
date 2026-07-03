@@ -1,6 +1,7 @@
 from app.server.agent.src.middlewares.a2a_context_middleware import A2AAgentContextMiddleware
 from app.server.agent.src.middlewares.interrupt_middleware import InterruptMiddleware
 from app.server.agent.src.middlewares.memory_placeholder_middleware import MemoryPlaceholderMiddleware
+from app.server.agent.src.middlewares.planning_middleware import PlanningMiddleware
 from app.server.agent.src.middlewares.retrieval_context_middleware import InjectRetrievalContextMiddleware
 from app.server.agent.src.middlewares.single_tool_call_middleware import SingleToolCallMiddleware
 from app.server.agent.src.middlewares.tool_args_inject_middleware import ToolArgsInjectMiddleware
@@ -36,6 +37,10 @@ class MiddlewareFactory:
         # 基础能力：工具调用日志。默认开启，方便后续排查 Agent 为什么调用了某个工具。
         middlewares.append(ToolLoggingMiddleware())
 
+        # 可选能力：规划模式。开启后注入规划提示词，并消费 plan_confirmation 的 resume_value。
+        if current_features.enable_planning:
+            middlewares.append(PlanningMiddleware())
+
         # 基础能力：通用中断。默认开启，但只有 state.interrupt_enabled=true 时才真正触发。
         middlewares.append(InterruptMiddleware())
 
@@ -66,8 +71,10 @@ class MiddlewareFactory:
             "ToolErrorHandlerMiddleware",
             "ToolArgsInjectMiddleware",
             "ToolLoggingMiddleware",
-            "InterruptMiddleware",
         ]
+        if current_features.enable_planning:
+            names.append("PlanningMiddleware")
+        names.append("InterruptMiddleware")
         if current_features.enable_memory:
             names.append("MemoryPlaceholderMiddleware")
         names.append("InjectRetrievalContextMiddleware")

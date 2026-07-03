@@ -21,7 +21,7 @@ Agent 在执行复杂任务时，经常需要暂停等待用户参与，例如�
   ↓
 前端展示交互卡片
   ↓
-用户通过 /agent/resume 返回内容
+用户继续调用 /agent/messages 返回内容
   ↓
 通用中断中间件把用户返回写回 state
   ↓
@@ -161,7 +161,7 @@ Agent 在执行复杂任务时，经常需要暂停等待用户参与，例如�
 
 ## 5. resume_value 协议
 
-用户通过 `/agent/resume` 返回：
+用户通过 `/agent/messages` 返回结构化 payload，后端内部转换为 `resume_value`：
 
 ```json
 {
@@ -232,7 +232,7 @@ Agent 在执行复杂任务时，经常需要暂停等待用户参与，例如�
 1. 检查 `interrupt_enabled`。
 2. 读取 `interrupt_payload`。
 3. 调用 LangGraph `interrupt(interrupt_payload)`。
-4. 等待 `/agent/resume` 传回用户内容。
+4. 等待 `/agent/messages` 命中中断运行后传回用户内容。
 5. 把用户内容写入 `resume_value`。
 6. 清理 `interrupt_enabled` 和 `interrupt_payload`。
 
@@ -305,22 +305,25 @@ def normalize_resume_value(payload, raw_resume_value):
 
 工具不直接调用 `interrupt()`。
 
-工具只负责写 state：
+工具只负责写 state，并建议对会触发中断的工具显式返回 `Command(update=..., goto="model")`：
 
-```json
-{
-  "interrupt_enabled": true,
-  "interrupt_payload": {
-    "type": "plan_confirmation",
-    "data": {
-      "title": "请确认任务计划",
-      "task_plan": {}
-    }
-  }
-}
+```python
+return Command(
+    update={
+        "interrupt_enabled": True,
+        "interrupt_payload": {
+            "type": "plan_confirmation",
+            "data": {
+                "title": "请确认任务计划",
+                "task_plan": task_plan
+            }
+        }
+    },
+    goto="model"
+)
 ```
 
-然后 `InterruptMiddleware` 自动触发中断。
+`goto="model"` 会把控制权明确交回模型节点前的中间件链，随后 `InterruptMiddleware.before_model` 自动触发中断。
 
 这样工具不需要关心 LangGraph 的中断恢复细节。
 
@@ -362,13 +365,15 @@ payload.type
 | `tool_approval` | 工具审批卡片 |
 | `draft_review` | 内容审阅卡片 |
 
-## 9. /agent/resume 请求格式
+## 9. /agent/messages 中断恢复请求格式
 
 ```json
 {
-  "run_id": "run_xxx",
-  "thread_id": "thread_xxx",
-  "resume_value": {
+  "agent_id": "orchestrator-agent",
+  "conversation_id": "conv_xxx",
+  "message": "用户已确认任务计划",
+  "message_type": "action_click",
+  "payload": {
     "type": "plan_confirmation",
     "data": {
       "action": "approve",
@@ -379,7 +384,8 @@ payload.type
 }
 ```
 
-后端恢复后，`InterruptMiddleware` 会把这个值写入 state 的 `resume_value`。
+后端发现该 `conversation_id` 存在 interrupted 运行后，会把 `payload` 转换为 `Command(resume=...)` 所需的 `resume_value`。
+恢复后，`InterruptMiddleware` 会把这个值写入 state 的 `resume_value`。
 
 业务中间件随后按 `resume_value.type` 处理。
 
@@ -400,7 +406,7 @@ InterruptMiddleware 触发 interrupt
   ↓
 用户选择 approve/revise/cancel
   ↓
-前端调用 /agent/resume
+前端调用 /agent/messages
   ↓
 InterruptMiddleware 写 resume_value.type=plan_confirmation
   ↓

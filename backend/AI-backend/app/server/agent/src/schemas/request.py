@@ -52,6 +52,10 @@ class AgentOptionalFeatures(BaseModel):
         default=False,
         description="是否启用长期记忆能力；当前为预留能力，不等同于 conversation_id 控制的会话上下文。",
     )
+    planning_enabled: bool = Field(
+        default=False,
+        description="是否启用规划模式；开启后自动装配任务计划工具和规划中间件。",
+    )
 
 
 class AgentA2AConfig(BaseModel):
@@ -68,9 +72,9 @@ class AgentA2AConfig(BaseModel):
 
 
 class AgentRunRequest(BaseModel):
-    """通用 Agent 真实运行请求模型。
+    """通用 Agent 底层运行请求模型。
 
-    /agent/run 支持两种运行方式：
+    该模型主要供 AgentMessageService 和编排层内部调用：
     - 传 agent_id：以 Agent 模板配置为主运行，请求体只提供 query、conversation_id、stream 等本次调用参数。
     - 不传 agent_id：按请求体中的临时配置直接运行。
 
@@ -116,3 +120,107 @@ class AgentRunRequest(BaseModel):
         stripped = value.strip()
         return stripped or None
 
+
+class AgentMessageRequest(BaseModel):
+    """统一 Agent 消息入口请求模型。
+
+    该模型用于正式对外的 /agent/messages 接口。
+    前端不需要关心本次输入是新任务还是中断恢复；后端会根据 conversation_id
+    自动判断是否存在 interrupted 状态的运行，并路由到 run 或 resume。
+    """
+
+    agent_id: str | None = Field(
+        default=None,
+        max_length=100,
+        description="可选 Agent 模板 ID；新任务时用于加载模板配置，中断恢复时以原 run 记录为准。",
+    )
+    conversation_id: str | None = Field(
+        default=None,
+        description="会话 ID；用于查找当前会话是否存在等待恢复的中断运行。",
+    )
+    message: str = Field(
+        default="",
+        description="用户本次输入文本；表单提交或按钮确认时可以是前端生成的摘要文本。",
+    )
+    message_type: str = Field(
+        default="text",
+        description="消息类型，例如 text/form_submit/action_click/file_submit。",
+    )
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        description="结构化消息负载；中断恢复时建议使用 {type: string, data: object}。",
+    )
+    stream: bool = Field(default=True, description="是否使用 SSE 流式返回。")
+    system_prompt: str | None = Field(default=None, description="新任务运行时使用的临时系统提示词。")
+    inputs: dict[str, Any] = Field(default_factory=dict, description="新任务运行时注入的业务变量。")
+    files: list[dict[str, Any]] = Field(default_factory=list, description="附件上下文预留字段。")
+    tools: list[str] = Field(default_factory=list, description="新任务运行时允许加载的常规工具名称。")
+    optional_features: AgentOptionalFeatures = Field(
+        default_factory=AgentOptionalFeatures,
+        description="新任务运行时可选增强能力。",
+    )
+    a2a: AgentA2AConfig | None = Field(default=None, description="新任务运行时的 A2A 调用配置。")
+    runtime_options: ModelRuntimeOptions = Field(
+        default_factory=ModelRuntimeOptions,
+        description="新任务运行时的模型参数。",
+    )
+
+    @field_validator("agent_id", "conversation_id")
+    @classmethod
+    def normalize_optional_id(cls, value: str | None) -> str | None:
+        """清理可选 ID 两侧空白，空字符串视为未传。"""
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("message_type")
+    @classmethod
+    def normalize_message_type(cls, value: str) -> str:
+        """清理消息类型，缺省时使用 text。"""
+        stripped = (value or "").strip()
+        return stripped or "text"
+
+    @field_validator("message")
+    @classmethod
+    def normalize_message(cls, value: str) -> str:
+        """清理消息文本；结构化表单提交允许文本为空。"""
+        return (value or "").strip()
+
+
+class AgentResumeRequest(BaseModel):
+    """Agent 底层中断恢复请求模型。
+
+    该模型主要供 AgentMessageService 内部使用，用于恢复已经触发 LangGraph interrupt 的 Agent 运行。
+    恢复时必须带回中断事件中的 run_id 和 thread_id，并传入固定格式的 resume_value。
+    """
+
+    run_id: str = Field(..., min_length=1, description="被中断的 Agent 运行 ID。")
+    thread_id: str = Field(..., min_length=1, description="LangGraph checkpoint 线程 ID，必须使用中断事件返回的 thread_id。")
+    resume_value: dict[str, Any] = Field(
+        ...,
+        description="恢复值，固定外层格式为 {type: string, data: object}。",
+    )
+    stream: bool = Field(default=True, description="是否使用 SSE 流式返回恢复后的事件。")
+
+    @field_validator("run_id", "thread_id")
+    @classmethod
+    def normalize_required_id(cls, value: str) -> str:
+        """清理必填 ID 两侧空白。"""
+        return value.strip()
+
+    @field_validator("resume_value")
+    @classmethod
+    def validate_resume_value(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """校验 resume_value 的最小协议格式。"""
+        if not isinstance(value, dict):
+            raise ValueError("resume_value 必须是对象")
+        resume_type = str(value.get("type") or "").strip()
+        if not resume_type:
+            raise ValueError("resume_value.type 不能为空")
+        data = value.get("data")
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError("resume_value.data 必须是对象")
+        return {"type": resume_type, "data": data}

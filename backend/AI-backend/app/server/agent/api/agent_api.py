@@ -8,10 +8,10 @@ from sqlmodel import Session
 
 from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
-from app.server.agent.src.agent import AgentService
+from app.server.agent.src.agent import AgentMessageService, AgentService
 from app.server.agent.src.model import ModelConfigService
 from app.server.agent.src.model.schemas import ModelConfigSearchRequest
-from app.server.agent.src.schemas.request import AgentRunRequest
+from app.server.agent.src.schemas.request import AgentMessageRequest
 from app.server.agent.src.mcp.schemas import AgentMCPToolSearchRequest
 from app.server.agent.src.schemas.response import AgentCapabilityResponse, AgentRunResponse, ModelConfigResponse
 from app.server.agent.src.tools.schemas import AgentToolInfo
@@ -19,6 +19,7 @@ from app.server.agent.src.tools.schemas import AgentToolInfo
 
 router = APIRouter()
 agent_service = AgentService()
+agent_message_service = AgentMessageService(agent_service=agent_service)
 model_config_service = ModelConfigService()
 
 
@@ -122,13 +123,18 @@ def _format_sse_event(event: dict[str, Any]) -> str:
     return f"event: {event_type}\ndata: {payload}\n\n"
 
 
-@router.post("/run", response_model=Result[AgentRunResponse], summary="运行通用 Agent")
-async def run_agent(request: AgentRunRequest, db: Session = Depends(get_postgres_engine)):
-    """运行通用 Agent？stream=false 返回 JSON，stream=true 返回 SSE。"""
+@router.post("/messages", response_model=Result[AgentRunResponse], summary="发送 Agent 消息")
+async def send_agent_message(request: AgentMessageRequest, db: Session = Depends(get_postgres_engine)):
+    """统一 Agent 消息入口。
+
+    前端只需要调用该接口：
+    - 当前会话没有待恢复中断时，后端自动创建新的 Agent 运行。
+    - 当前会话存在 interrupted 运行时，后端自动转换为 Command(resume=...) 恢复执行。
+    """
     if request.stream:
         async def event_generator():
-            """按 SSE 格式逐条产出 Agent 运行事件。"""
-            async for event in agent_service.stream(request, db):
+            """按 SSE 格式逐条产出 Agent 消息处理事件。"""
+            async for event in agent_message_service.stream_message(request, db):
                 yield _format_sse_event(event)
 
         return StreamingResponse(
@@ -141,5 +147,5 @@ async def run_agent(request: AgentRunRequest, db: Session = Depends(get_postgres
             },
         )
 
-    result = await agent_service.run(request, db)
+    result = await agent_message_service.run_message(request, db)
     return Result.success(result)

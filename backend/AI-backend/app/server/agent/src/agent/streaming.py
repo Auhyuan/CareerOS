@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any
 
@@ -338,6 +339,190 @@ class AgentStreamEventParser:
                     parts.append(str(item.get("text") or item.get("content") or ""))
             return "".join(parts)
         return ""
+
+    def extract_task_plan_event(
+        self,
+        chunk: Any,
+        run_id: str,
+        thread_id: str,
+    ) -> dict[str, Any] | None:
+        """从 LangGraph updates 分片中提取 task_plan 更新事件。
+
+        Args:
+            chunk: LangGraph updates 模式返回的分片。
+            run_id: 当前 Agent 运行 ID。
+            thread_id: 当前 LangGraph thread ID。
+
+        Returns:
+            可直接返回给前端的 task_plan 事件；没有任务计划更新时返回 None。
+        """
+        task_plan = self.find_state_value(chunk, "task_plan")
+        if not isinstance(task_plan, dict):
+            return None
+
+        return {
+            "type": "task_plan",
+            "data": {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "task_plan": self.safe_event_value(task_plan),
+            },
+        }
+
+    def extract_interrupt_event(
+        self,
+        chunk: Any,
+        run_id: str,
+        thread_id: str,
+    ) -> dict[str, Any] | None:
+        """从 LangGraph updates 分片中提取 interrupt 事件。
+
+        Args:
+            chunk: LangGraph updates 模式返回的分片。
+            run_id: 当前 Agent 运行 ID。
+            thread_id: 当前 LangGraph thread ID。
+
+        Returns:
+            可直接返回给前端的 interrupt 事件；没有中断时返回 None。
+        """
+        if not isinstance(chunk, dict):
+            return None
+        interrupts = chunk.get("__interrupt__")
+        if not interrupts:
+            return None
+
+        first_interrupt = interrupts[0] if isinstance(interrupts, (list, tuple)) else interrupts
+        if isinstance(first_interrupt, dict) and "value" in first_interrupt:
+            payload = first_interrupt.get("value")
+        else:
+            payload = getattr(first_interrupt, "value", first_interrupt)
+        safe_payload = self.safe_event_value(payload)
+        if not isinstance(safe_payload, dict):
+            safe_payload = {"type": "unknown", "data": {"value": safe_payload}}
+
+        return {
+            "type": "interrupt",
+            "data": {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "payload": safe_payload,
+            },
+        }
+
+
+    def extract_interrupt_event_from_error(
+        self,
+        error: BaseException,
+        run_id: str,
+        thread_id: str,
+    ) -> dict[str, Any] | None:
+        """从 GraphInterrupt 异常中提取 interrupt 事件。
+
+        Args:
+            error: LangGraph 抛出的 GraphInterrupt 异常。
+            run_id: 当前 Agent 运行 ID。
+            thread_id: 当前 LangGraph thread ID。
+
+        Returns:
+            可直接返回给前端的 interrupt 事件；无法提取时返回 None。
+        """
+        interrupts = error.args[0] if getattr(error, "args", None) else None
+        if not interrupts:
+            return None
+
+        first_interrupt = interrupts[0] if isinstance(interrupts, (list, tuple)) else interrupts
+        payload = getattr(first_interrupt, "value", first_interrupt)
+        safe_payload = self.safe_event_value(payload)
+        if not isinstance(safe_payload, dict):
+            safe_payload = {"type": "unknown", "data": {"value": safe_payload}}
+
+        return {
+            "type": "interrupt",
+            "data": {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "payload": safe_payload,
+            },
+        }
+
+    def extract_task_plan_event_from_interrupt(
+        self,
+        interrupt_event: dict[str, Any] | None,
+        run_id: str,
+        thread_id: str,
+    ) -> dict[str, Any] | None:
+        """从 interrupt payload 中兜底提取 task_plan 事件。
+
+        Args:
+            interrupt_event: 已归一化的 interrupt 事件。
+            run_id: 当前 Agent 运行 ID。
+            thread_id: 当前 LangGraph thread ID。
+
+        Returns:
+            可直接返回给前端的 task_plan 事件；payload 中没有任务计划时返回 None。
+        """
+        if not isinstance(interrupt_event, dict):
+            return None
+        data = interrupt_event.get("data")
+        if not isinstance(data, dict):
+            return None
+        payload = data.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        payload_data = payload.get("data")
+        if not isinstance(payload_data, dict):
+            return None
+        task_plan = payload_data.get("task_plan")
+        if not isinstance(task_plan, dict):
+            return None
+
+        return {
+            "type": "task_plan",
+            "data": {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "task_plan": self.safe_event_value(task_plan),
+            },
+        }
+
+    def find_state_value(self, value: Any, state_key: str) -> Any | None:
+        """在 updates 分片中递归查找指定 state 字段。
+
+        Args:
+            value: LangGraph updates 原始分片或其子节点。
+            state_key: 需要查找的 state 字段名。
+
+        Returns:
+            找到的 state 字段值；不存在时返回 None。
+        """
+        if isinstance(value, dict):
+            if state_key in value:
+                return value.get(state_key)
+            for child_key, child_value in value.items():
+                # __interrupt__ 不是普通 state 更新，避免从中断 payload 里误提取 task_plan。
+                if child_key == "__interrupt__":
+                    continue
+                found = self.find_state_value(child_value, state_key)
+                if found is not None:
+                    return found
+        if isinstance(value, (list, tuple)):
+            for child_value in value:
+                found = self.find_state_value(child_value, state_key)
+                if found is not None:
+                    return found
+        return None
+
+    def build_stable_signature(self, value: Any) -> str:
+        """为流式 state 值构建稳定签名，用于本轮内去重。
+
+        Args:
+            value: 任意 state 值。
+
+        Returns:
+            JSON 字符串签名；遇到不可 JSON 化对象时会先安全转换。
+        """
+        safe_value = self.safe_event_value(value)
+        return json.dumps(safe_value, ensure_ascii=False, sort_keys=True, default=str)
 
     @staticmethod
     def safe_event_value(obj: Any) -> Any:

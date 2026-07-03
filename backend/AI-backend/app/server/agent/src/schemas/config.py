@@ -13,6 +13,7 @@ class AgentFeatureConfig(BaseModel):
     """
 
     enable_memory: bool = Field(default=False, description="是否启用记忆相关中间件")
+    enable_planning: bool = Field(default=False, description="是否启用规划模式中间件和任务计划工具")
 
 
 class AgentBuildConfig(BaseModel):

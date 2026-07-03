@@ -255,6 +255,32 @@ class AgentRunService:
         )
         rows = db.exec(sql).all()
         return [self._to_view(row) for row in rows]
+
+    def get_latest_interrupted_by_conversation(self, db: Session, conversation_id: str) -> AgentRun | None:
+        """查询某个会话中最新的待恢复主 Agent 运行。
+
+        Args:
+            db: PostgreSQL Session。
+            conversation_id: 会话 ID。
+
+        Returns:
+            最新的 interrupted 状态主运行；不存在时返回 None。
+        """
+        cleaned_conversation_id = conversation_id.strip()
+        if not cleaned_conversation_id:
+            return None
+
+        sql = (
+            select(AgentRun)
+            .where(
+                AgentRun.conversation_id == cleaned_conversation_id,
+                AgentRun.run_type == "main",
+                AgentRun.status == "interrupted",
+            )
+            .order_by(AgentRun.started_at.desc())
+        )
+        return db.exec(sql).first()
+
     def get_by_run_id(self, db: Session, run_id: str) -> AgentRun | None:
         """根据 run_id 查询 Agent 运行记录。
 

@@ -50,6 +50,7 @@ class AgentRuntimeContextService:
             allowed_tools=request.tools,
             optional_features=optional_features,
             memory_enabled=request.optional_features.long_term_memory_enabled,
+            planning_enabled=request.optional_features.planning_enabled,
             a2a_sub_agent_list=a2a_sub_agent_list,
         )
 

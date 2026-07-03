@@ -1,6 +1,6 @@
 /**
  * Agent 运行相关接口
- * 字段与路径完全对齐后端 /agent/runs/* 与 /agent/run
+ * 前端调用统一消息入口 /agent/messages；历史运行记录仍使用 /agent/runs/*。
  */
 import { httpPost } from './http'
 import type { PageRequest, PageResponse } from './types'
@@ -55,7 +55,7 @@ export function getAgentRunChain(run_id: string) {
   return httpPost<AgentRunChain>('/agent/runs/chain', { run_id })
 }
 
-/** Agent 运行请求（AgentRunRequest） */
+/** Agent 消息请求兼容载荷；页面仍可传 query，这里会映射为后端 message。 */
 export interface AgentRunRequestPayload {
   agent_id?: string | null
   query: string
@@ -67,6 +67,7 @@ export interface AgentRunRequestPayload {
   tools?: string[]
   optional_features?: {
     long_term_memory_enabled?: boolean
+    planning_enabled?: boolean
   }
   a2a?: { sub_agent_list?: string[] } | null
   runtime_options?: {
@@ -78,6 +79,19 @@ export interface AgentRunRequestPayload {
   }
 }
 
+
+/** 将旧的 query 载荷转换为后端统一消息入口需要的 message 载荷。 */
+function toAgentMessagePayload(payload: AgentRunRequestPayload, stream: boolean) {
+  const { query, ...rest } = payload
+  return {
+    ...rest,
+    message: query,
+    message_type: 'text',
+    payload: {},
+    stream,
+  }
+}
+
 /** Agent 运行响应（AgentRunResponse） */
 export interface AgentRunResponse {
   run_id: string
@@ -86,7 +100,7 @@ export interface AgentRunResponse {
 
 /** 同步运行 Agent（stream=false） */
 export function runAgent(payload: AgentRunRequestPayload) {
-  return httpPost<AgentRunResponse>('/agent/run', { ...payload, stream: false })
+  return httpPost<AgentRunResponse>('/agent/messages', toAgentMessagePayload(payload, false))
 }
 
 /** SSE 事件类型 */
@@ -137,10 +151,10 @@ export async function runAgentStream(
 ) {
   const baseURL = (import.meta.env.VITE_API_BASE as string) || '/api'
   try {
-    const response = await fetch(`${baseURL}/agent/run`, {
+    const response = await fetch(`${baseURL}/agent/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, stream: true }),
+      body: JSON.stringify(toAgentMessagePayload(payload, true)),
     })
     if (!response.ok || !response.body) {
       throw new Error(`HTTP ${response.status}`)

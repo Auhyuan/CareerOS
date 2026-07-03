@@ -151,7 +151,7 @@ Agent 中断时，当前图状态必须保存下来，包括：
 ### 4.1 普通运行
 
 ```text
-POST /agent/run
+POST /agent/messages
   ↓
 创建 run_id
   ↓
@@ -167,7 +167,7 @@ Agent 执行
 ### 4.2 中断运行
 
 ```text
-POST /agent/run
+POST /agent/messages
   ↓
 创建 run_id
   ↓
@@ -189,7 +189,7 @@ run 状态更新为 interrupted
 ### 4.3 恢复运行
 
 ```text
-POST /agent/resume
+POST /agent/messages
   ↓
 传入 run_id + thread_id + 用户反馈
   ↓
@@ -220,7 +220,7 @@ interrupted
 
 ### 5.2 恢复依赖同一个 thread_id
 
-resume 时必须使用中断时的 `thread_id`。
+通过 `/agent/messages` 恢复时必须继续使用同一个 `conversation_id`，后端会映射到中断时的 `thread_id`。
 
 如果没有 `thread_id`，就无法恢复。
 
@@ -421,7 +421,7 @@ Agent 暂停执行
 [确认继续] [修改后继续] [取消]
 ```
 
-用户操作后，前端调用 `/agent/resume`。
+用户操作后，前端继续调用 `/agent/messages`。
 
 resume 之后，前端继续接收同一条 Agent 消息的后续流式事件。
 
@@ -431,10 +431,10 @@ resume 之后，前端继续接收同一条 Agent 消息的后续流式事件。
 
 ### 后端
 
-1. 增加 `/agent/resume`。
+1. 增加统一消息入口 `/agent/messages` 的中断恢复路由能力。
 2. 流式输出支持 `interrupt`。
 3. `agent_runs` 支持 `interrupted`。
-4. resume 时支持 `Command(resume=...)`。
+4. 统一消息入口命中中断后，内部使用 `Command(resume=...)`。
 5. 保证中断时返回 `thread_id`。
 
 ### 前端

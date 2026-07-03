@@ -9,7 +9,8 @@
       "create_job_skill"
     ],
     "optional_features": {
-      "long_term_memory_enabled": false
+      "long_term_memory_enabled": false,
+      "planning_enabled": false
     },
     "runtime_options": {
       "temperature": 0.1,

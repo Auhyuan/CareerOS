@@ -43,7 +43,7 @@ class AIBackendAgentClient:
         """调用 AI-backend 执行 Agent。
 
         Args:
-            payload: 发送给 AI-backend /agent/run 的请求体。
+            payload: 发送给 AI-backend /agent/messages 的请求体。
 
         Returns:
             AI-backend 返回的 Agent 执行结果 data。
@@ -52,7 +52,7 @@ class AIBackendAgentClient:
             RuntimeError: HTTP 请求失败、返回格式异常或业务状态码异常时抛出。
         """
         data = self._post(
-            path="/agent/run",
+            path="/agent/messages",
             payload=payload,
             operation_name="调用 AI-backend Agent",
         )

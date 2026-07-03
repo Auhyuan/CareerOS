@@ -1,12 +1,14 @@
 from app.server.agent.src.schemas.config import AgentBuildConfig, AgentFeatureConfig
-from app.server.agent.src.schemas.request import AgentOptionalFeatures, AgentRunRequest, ModelRuntimeOptions
+from app.server.agent.src.schemas.request import AgentMessageRequest, AgentOptionalFeatures, AgentResumeRequest, AgentRunRequest, ModelRuntimeOptions
 from app.server.agent.src.schemas.response import AgentCapabilityResponse, AgentRunResponse, ModelConfigResponse
 
 
 __all__ = [
     "AgentBuildConfig",
     "AgentFeatureConfig",
+    "AgentMessageRequest",
     "AgentOptionalFeatures",
+    "AgentResumeRequest",
     "AgentRunRequest",
     "ModelRuntimeOptions",
     "AgentCapabilityResponse",

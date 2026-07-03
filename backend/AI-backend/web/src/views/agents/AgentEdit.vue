@@ -120,6 +120,10 @@
           <a-switch v-model:checked="form.config.optional_features!.long_term_memory_enabled" />
           <span class="text-gray-500 ml-2">开启后可跨会话记住用户偏好</span>
         </a-form-item>
+        <a-form-item label="规划模式">
+          <a-switch v-model:checked="form.config.optional_features!.planning_enabled" />
+          <span class="text-gray-500 ml-2">开启后复杂任务会先生成任务计划，并等待用户确认</span>
+        </a-form-item>
         <a-form-item label="可被 A2A 调用 (is_sub_agent)">
           <a-switch v-model:checked="form.config.is_sub_agent" />
           <span class="text-gray-500 ml-2">开启后其他 Agent 可通过 A2A 工具调用本 Agent</span>
@@ -188,6 +192,7 @@ const form = reactive<AgentTemplate>({
     },
     optional_features: {
       long_term_memory_enabled: false,
+      planning_enabled: false,
     },
     a2a: null,
   },

@@ -384,7 +384,7 @@ class JobProfileService:
         runtime_overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        将 Agent 模板配置展开为 /agent/run 请求参数。
+        将 Agent 模板配置展开为 /agent/messages 请求参数。
 
         Args:
             query: 本次岗位画像任务指令。
@@ -392,15 +392,17 @@ class JobProfileService:
             runtime_overrides: 本次调用需要覆盖的模型运行参数。
 
         Returns:
-            可直接提交给能力层 /agent/run 的请求体。
+            可直接提交给能力层 /agent/messages 的请求体。
         """
         runtime_options = dict(template_config.get("runtime_options") or {})
         if runtime_overrides:
             runtime_options.update(runtime_overrides)
 
-        # query 是每次业务调用产生的动态内容，其余装配参数全部来源于 Agent 模板。
+        # message 是每次业务调用产生的动态内容，其余装配参数全部来源于 Agent 模板。
         return {
-            "query": query,
+            "message": query,
+            "message_type": "text",
+            "payload": {},
             "system_prompt": template_config["system_prompt"],
             "inputs": {},
             "files": [],
@@ -414,7 +416,7 @@ class JobProfileService:
         执行岗位画像 Agent 请求并转换能力层调用异常。
 
         Args:
-            payload: 已完成模板展开的 /agent/run 请求体。
+            payload: 已完成模板展开的 /agent/messages 请求体。
 
         Returns:
             能力层 Agent 运行结果。

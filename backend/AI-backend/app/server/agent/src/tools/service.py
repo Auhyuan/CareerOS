@@ -7,6 +7,8 @@ from sqlmodel import Session
 from app.common.core.exceptions import BusinessException
 from app.server.agent.src.mcp import MCPService
 from app.server.agent.src.tools.a2a_tool import a2a_call
+from app.server.agent.src.tools.base import AgentToolDefinition
+from app.server.agent.src.tools.planning_tools import set_task_plan, update_task_step
 from app.server.agent.src.tools.registry import AgentToolRegistry
 from app.server.agent.src.tools.schemas import AgentToolInfo
 
@@ -31,10 +33,21 @@ class AgentToolService:
     def _register_builtin_tools(self) -> None:
         """注册 AI-backend 内部工具。
 
-        当前 AI-backend 暂时没有固定内置工具；A2A 由运行参数动态注入，
-        Job 技能相关工具通过 MCP 从 orchestration-backend 加载。
+        规划工具属于内部动态工具：
+        - 工具管理页可以展示它们的参数和说明。
+        - 真正运行时由 optional_features.planning_enabled 自动注入。
+        - 因为依赖 LangGraph ToolRuntime.state，不允许在工具测试页直接调用。
         """
-        return
+        self.registry.register(AgentToolDefinition(
+            name=set_task_plan.name,
+            description=set_task_plan.description or "创建或重写任务计划草稿，并触发用户确认。",
+            callable_ref=set_task_plan,
+        ))
+        self.registry.register(AgentToolDefinition(
+            name=update_task_step.name,
+            description=update_task_step.description or "更新运行中任务计划的单个步骤。",
+            callable_ref=update_task_step,
+        ))
 
     def _build_args_schema(self, tool: Any) -> dict[str, Any]:
         """提取工具暴露给模型的参数 JSON Schema。
@@ -67,11 +80,13 @@ class AgentToolService:
         Returns:
             工具管理页展示使用的 AgentToolInfo。
         """
+        is_planning_tool = definition.name in {set_task_plan.name, update_task_step.name}
         return AgentToolInfo(
             name=definition.name,
             description=definition.description,
-            group="regular",
-            invokable=True,
+            group="planning" if is_planning_tool else "regular",
+            invokable=not is_planning_tool,
+            invoke_note="规划工具依赖 LangGraph 运行态，只能通过 /agent/run 的 planning_enabled 自动启用。" if is_planning_tool else None,
             args_schema=self._build_args_schema(definition.callable_ref),
         )
 
@@ -157,6 +172,11 @@ class AgentToolService:
             raise BusinessException(
                 code=400,
                 msg="a2a_call 是动态工具，需要通过 /agent/run 的 A2A 配置启用，不能直接测试调用。",
+            )
+        if cleaned_name in {set_task_plan.name, update_task_step.name}:
+            raise BusinessException(
+                code=400,
+                msg="规划工具依赖 LangGraph 运行态，请通过 /agent/run 开启 planning_enabled 后由 Agent 调用。",
             )
         if not self.registry.has_tool(cleaned_name):
             if db is None:
