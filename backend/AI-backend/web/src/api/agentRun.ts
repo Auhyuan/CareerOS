@@ -61,6 +61,8 @@ export interface AgentRunRequestPayload {
   query: string
   conversation_id?: string
   stream?: boolean
+  message_type?: string
+  payload?: Record<string, unknown>
   system_prompt?: string
   inputs?: Record<string, unknown>
   files?: Array<Record<string, unknown>>
@@ -82,12 +84,12 @@ export interface AgentRunRequestPayload {
 
 /** 将旧的 query 载荷转换为后端统一消息入口需要的 message 载荷。 */
 function toAgentMessagePayload(payload: AgentRunRequestPayload, stream: boolean) {
-  const { query, ...rest } = payload
+  const { query, message_type, payload: structuredPayload, ...rest } = payload
   return {
     ...rest,
     message: query,
-    message_type: 'text',
-    payload: {},
+    message_type: message_type || 'text',
+    payload: structuredPayload || {},
     stream,
   }
 }

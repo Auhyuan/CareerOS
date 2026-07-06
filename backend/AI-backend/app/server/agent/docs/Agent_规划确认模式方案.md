@@ -91,14 +91,14 @@ Agent 不能绕过用户确认，不能自己把任务计划整体状态改成 `
       "step_id": "step_1",
       "title": "分析用户提供的岗位描述",
       "description": "识别岗位名称、职责和能力要求",
-      "status": "todo",
+      "status": "waiting",
       "result": null
     },
     {
       "step_id": "step_2",
       "title": "提炼核心技能",
       "description": "抽取必备技能和加分技能",
-      "status": "todo",
+      "status": "waiting",
       "result": null
     }
   ]
@@ -109,11 +109,10 @@ Agent 不能绕过用户确认，不能自己把任务计划整体状态改成 `
 
 | 状态 | 说明 |
 |------|------|
-| `todo` | 等待执行 |
+| `waiting` | 待执行 |
 | `running` | 执行中 |
-| `completed` | 已完成 |
-| `blocked` | 执行受阻，需要说明原因或补充信息 |
-| `skipped` | 已跳过 |
+| `done` | 已完成 |
+| `failed` | 执行失败，失败后应停止后续步骤并向用户说明原因 |
 
 ## 6. optional_features.planning_enabled
 
@@ -169,7 +168,7 @@ Agent 不能绕过用户确认，不能自己把任务计划整体状态改成 `
 
 1. 创建或重写 `task_plan`。
 2. 强制设置 `task_plan.status = draft`。
-3. 初始化步骤状态为 `todo`。
+3. 初始化步骤状态为 `waiting`。
 4. 设置 `interrupt_enabled = true`。
 5. 设置 `interrupt_payload.type = plan_confirmation`。
 6. 返回 `Command(update=..., goto="model")`，显式把控制权交回模型节点前的中间件链。
@@ -214,7 +213,7 @@ return Command(
 ```json
 {
   "step_id": "step_1",
-  "status": "completed",
+  "status": "done",
   "result": "已识别岗位为 AI 应用开发工程师"
 }
 ```
@@ -223,8 +222,17 @@ return Command(
 
 1. 从 `task_plan.steps` 中找到对应步骤。
 2. 更新步骤状态、结果和备注。
-3. 如果所有步骤都已完成或跳过，系统可以把 `task_plan.status` 设置为 `completed`。
+3. 如果所有步骤都已完成，系统可以把 `task_plan.status` 设置为 `completed`。
 4. 返回更新后的任务计划摘要。
+
+#### update_task_step 使用要求
+
+Agent 执行已确认计划时，必须按以下方式使用 `update_task_step`：
+
+1. 开始执行某个步骤前，先调用 `update_task_step`，把该步骤状态设置为 `running`。
+2. 步骤执行成功后，调用 `update_task_step`，把该步骤状态设置为 `done`，并在 `result` 中写入执行结果。
+3. 步骤执行失败后，调用 `update_task_step`，把该步骤状态设置为 `failed`，并在 `note` 或 `result` 中写入失败原因。
+4. 步骤失败后，不继续执行剩余步骤，直接回复用户：`任务执行失败，原因：具体原因`。
 
 ## 8. 中间件设计
 
@@ -395,7 +403,7 @@ Agent 输出最终结果
           "step_id": "step_1",
           "title": "分析岗位描述",
           "description": "识别岗位名称、职责和能力要求",
-          "status": "todo",
+          "status": "waiting",
           "result": null,
           "note": null
         }

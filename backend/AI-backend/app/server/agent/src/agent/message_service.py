@@ -84,13 +84,6 @@ class AgentMessageService:
         pending_run = self._find_pending_interrupted_run(request, db)
         if pending_run is not None:
             resume_request = self._build_resume_request(request, pending_run, stream=stream)
-            logger.info(
-                "统一消息入口路由到中断恢复: conversation_id=%s run_id=%s message_type=%s stream=%s",
-                request.conversation_id,
-                resume_request.run_id,
-                request.message_type,
-                stream,
-            )
             return "resume", resume_request
 
         run_request = self._build_run_request(request, stream=stream)

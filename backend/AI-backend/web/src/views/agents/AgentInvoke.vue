@@ -124,6 +124,49 @@
                   </span>
                 </div>
 
+                <div v-else-if="block.type === 'task_plan'" class="message-task-plan">
+                  <div class="plan-header">
+                    <span class="plan-icon">🗓</span>
+                    <span class="plan-title">{{ block.task_plan.title || '任务计划' }}</span>
+                    <span class="plan-status">{{ block.task_plan.status || 'draft' }}</span>
+                  </div>
+                  <div v-if="getTaskPlanSteps(block.task_plan).length" class="plan-steps">
+                    <div v-for="step in getTaskPlanSteps(block.task_plan)" :key="step.step_id || step.title" class="plan-step">
+                      <span class="step-status" :class="getTaskStepStatusClass(step.status)">{{ step.status || 'waiting' }}</span>
+                      <span class="step-title">{{ step.title || step.description || '-' }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-else-if="block.type === 'interrupt'" class="message-interrupt">
+                  <div class="interrupt-header">
+                    <span class="interrupt-icon">⏸</span>
+                    <span class="interrupt-title">需要你确认任务计划</span>
+                    <span v-if="block.status === 'answered'" class="interrupt-done">已处理</span>
+                  </div>
+                  <div v-if="getInterruptTaskPlan(block)" class="interrupt-plan">
+                    <div class="plan-title">{{ getInterruptTaskPlan(block)?.title || '任务计划' }}</div>
+                    <div v-for="step in getTaskPlanSteps(getInterruptTaskPlan(block))" :key="step.step_id || step.title" class="plan-step">
+                      <span class="step-status" :class="getTaskStepStatusClass(step.status)">{{ step.status || 'waiting' }}</span>
+                      <span class="step-title">{{ step.title || step.description || '-' }}</span>
+                    </div>
+                  </div>
+                  <div v-if="block.status === 'waiting'" class="interrupt-actions">
+                    <a-space wrap>
+                      <a-button type="primary" size="small" @click="submitPlanConfirmation(i, bi, 'approve')">确认执行</a-button>
+                      <a-button danger size="small" @click="submitPlanConfirmation(i, bi, 'cancel')">取消计划</a-button>
+                    </a-space>
+                    <div class="interrupt-feedback">
+                      <a-textarea
+                        v-model:value="block.feedback"
+                        :rows="2"
+                        placeholder="如果需要修改计划，在这里输入建议后点击提交修改"
+                      />
+                      <a-button size="small" @click="submitPlanConfirmation(i, bi, 'revise')">提交修改意见</a-button>
+                    </div>
+                  </div>
+                </div>
+
                 <div v-else-if="block.type === 'content'" class="message-content">{{ block.content }}</div>
               </div>
             </template>
@@ -177,8 +220,8 @@
           v-model:value="input"
           :rows="1"
           :auto-size="{ minRows: 1, maxRows: 6 }"
-          placeholder="输入你的问题, Enter 发送, Shift+Enter 换行"
-          :disabled="running || !selectedAgentId"
+          :placeholder="inputPlaceholder"
+          :disabled="inputDisabled"
           class="chat-input"
           @pressEnter="onPressEnter"
         />
@@ -186,7 +229,7 @@
           type="primary"
           class="send-btn"
           :loading="running"
-          :disabled="!selectedAgentId || !input.trim()"
+          :disabled="inputDisabled || !input.trim()"
           @click="onRun"
         >
           <template #icon v-if="!running"><SendOutlined /></template>
@@ -194,7 +237,10 @@
         </a-button>
       </div>
       <div class="input-hint">
-        <span v-if="selectedAgentId" class="hint-active">
+        <span v-if="waitingPlanConfirmation" class="hint-active hint-waiting">
+          <ThunderboltOutlined /> 当前 Agent 已暂停，请先处理上方任务计划确认卡片
+        </span>
+        <span v-else-if="selectedAgentId" class="hint-active">
           <ThunderboltOutlined /> 当前会话 ID: {{ conversationId.slice(0, 16) }}...
         </span>
         <span v-else>👈 请先选择 Agent</span>
@@ -247,8 +293,8 @@ const conversationId = ref<string>('')
 const input = ref('')
 const running = ref(false)
 
-/** Agent 流式展示块,用于按事件到达顺序渲染思考、工具调用和正式回复。 */
-type StreamBlock = ReasoningBlock | ContentBlock | ToolCallBlock
+/** Agent 流式展示块,用于按事件到达顺序渲染思考、工具调用、任务计划、中断确认和正式回复。 */
+type StreamBlock = ReasoningBlock | ContentBlock | ToolCallBlock | TaskPlanBlock | InterruptBlock
 
 /** 思考过程块。 */
 interface ReasoningBlock {
@@ -272,6 +318,20 @@ interface ToolCallBlock {
   /** 工具执行结果摘要(来自后端 tool_result.output), 仅作展示用。 */
   output: unknown
   status: 'running' | 'done' | 'failed'
+}
+
+/** 任务计划展示块。 */
+interface TaskPlanBlock {
+  type: 'task_plan'
+  task_plan: Record<string, any>
+}
+
+/** 中断确认展示块。 */
+interface InterruptBlock {
+  type: 'interrupt'
+  payload: Record<string, any>
+  status: 'waiting' | 'answered'
+  feedback: string
 }
 
 interface MessageItem {
@@ -313,9 +373,30 @@ const waitingFirstToken = computed(() => {
   return !last.content && !last.reasoning
 })
 
+/** 是否存在等待用户处理的任务计划确认卡片。 */
+const waitingPlanConfirmation = computed(() => findWaitingPlanInterrupt() !== null)
+
+/** 输入框是否禁用：运行中、未选 Agent 或存在待确认卡片时都不允许输入新对话。 */
+const inputDisabled = computed(() => running.value || !selectedAgentId.value || waitingPlanConfirmation.value)
+
+/** 输入框占位文案，根据当前交互状态提示用户下一步。 */
+const inputPlaceholder = computed(() => {
+  if (waitingPlanConfirmation.value) return '请先处理上方任务计划确认卡片'
+  if (!selectedAgentId.value) return '请先选择 Agent 模板'
+  return '输入你的问题, Enter 发送, Shift+Enter 换行'
+})
+
 /** 生成临时会话 ID */
 function uuid() {
   return 'conv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
+}
+
+/** 确保当前页面有可用于 checkpointer 的会话 ID。 */
+function ensureConversationId() {
+  if (!conversationId.value) {
+    conversationId.value = uuid()
+  }
+  return conversationId.value
 }
 
 /** 加载 Agent 模板列表 */
@@ -395,6 +476,7 @@ function onAreaScroll() {
 function onPressEnter(e: KeyboardEvent) {
   if (e.shiftKey) return  // Shift+Enter 换行
   e.preventDefault()
+  if (inputDisabled.value) return
   onRun()
 }
 
@@ -599,8 +681,255 @@ function markRunningTools(index: number, status: 'done' | 'failed') {
   })
 }
 
-/** 发送运行请求 */
+/** 从任务计划对象中读取步骤列表，避免模板里直接假设后端字段一定存在。 */
+function getTaskPlanSteps(taskPlan: Record<string, any> | null | undefined): Array<Record<string, any>> {
+  const steps = taskPlan?.steps
+  return Array.isArray(steps) ? steps.filter((item) => item && typeof item === 'object') : []
+}
+
+/** 根据任务步骤状态返回对应的样式类名。 */
+function getTaskStepStatusClass(status: unknown): string {
+  const normalizedStatus = String(status || 'waiting').toLowerCase()
+  return `step-status-${normalizedStatus}`
+}
+
+/** 从 interrupt block 中读取待确认的任务计划。 */
+function getInterruptTaskPlan(block: InterruptBlock): Record<string, any> | null {
+  const data = block.payload?.data
+  if (!data || typeof data !== 'object') return null
+  const taskPlan = (data as Record<string, any>).task_plan
+  return taskPlan && typeof taskPlan === 'object' ? taskPlan as Record<string, any> : null
+}
+
+/** 把 task_plan 事件追加到 assistant 时间线中。 */
+function appendTaskPlanBlock(index: number, data: Record<string, any>) {
+  const taskPlan = data.task_plan
+  if (!taskPlan || typeof taskPlan !== 'object') return
+  updateAssistantMessage(index, (message) => ({
+    ...message,
+    blocks: [...message.blocks, { type: 'task_plan', task_plan: taskPlan as Record<string, any> }],
+  }))
+}
+
+/** 对任意 JSON 值递归排序对象 key，保证任务计划签名稳定。 */
+function normalizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => normalizeJsonValue(item))
+  if (value && typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = normalizeJsonValue((value as Record<string, unknown>)[key])
+        return acc
+      }, {})
+  }
+  return value
+}
+
+/** 为任务计划构建稳定签名，用来判断 task_plan 与 interrupt 里的计划是否重复。 */
+function buildTaskPlanSignature(taskPlan: Record<string, any> | null | undefined): string {
+  try {
+    return JSON.stringify(normalizeJsonValue(taskPlan || {}))
+  } catch {
+    return String(taskPlan || '')
+  }
+}
+
+/** 判断中断 payload 中是否携带任务计划。 */
+function getTaskPlanFromInterruptPayload(payload: Record<string, any>): Record<string, any> | null {
+  const data = payload.data
+  if (!data || typeof data !== 'object') return null
+  const taskPlan = (data as Record<string, any>).task_plan
+  return taskPlan && typeof taskPlan === 'object' ? taskPlan as Record<string, any> : null
+}
+
+/** 如果中断卡片已经包含同一份草稿计划，则移除刚刚追加的重复 task_plan 块。 */
+function removeDuplicatedDraftPlanBeforeInterrupt(blocks: StreamBlock[], taskPlan: Record<string, any> | null): StreamBlock[] {
+  if (!taskPlan || blocks.length === 0) return blocks
+  const lastBlock = blocks[blocks.length - 1]
+  if (lastBlock.type !== 'task_plan') return blocks
+
+  const samePlan = buildTaskPlanSignature(lastBlock.task_plan) === buildTaskPlanSignature(taskPlan)
+  const isDraft = String(lastBlock.task_plan.status || taskPlan.status || '').toLowerCase() === 'draft'
+  return samePlan && isDraft ? blocks.slice(0, -1) : blocks
+}
+
+/** 把 interrupt 事件追加到 assistant 时间线中，用于渲染用户确认卡片。 */
+function appendInterruptBlock(index: number, data: Record<string, any>) {
+  const payload = data.payload
+  if (!payload || typeof payload !== 'object') return
+  const taskPlan = getTaskPlanFromInterruptPayload(payload as Record<string, any>)
+
+  updateAssistantMessage(index, (message) => {
+    // set_task_plan 后端会先推 task_plan，再推 interrupt；确认卡片本身也包含同一份 draft，
+    // 因此这里合并展示，避免用户在同一轮里看到两张完全相同的任务计划卡片。
+    const blocks = removeDuplicatedDraftPlanBeforeInterrupt([...message.blocks], taskPlan)
+    return {
+      ...message,
+      blocks: [
+        ...blocks,
+        {
+          type: 'interrupt',
+          payload: payload as Record<string, any>,
+          status: 'waiting',
+          feedback: '',
+        },
+      ],
+    }
+  })
+}
+
+/** 标记某个中断确认块已经被用户处理，避免重复点击。 */
+function markInterruptAnswered(messageIndex: number, blockIndex: number) {
+  updateAssistantMessage(messageIndex, (message) => {
+    const blocks = message.blocks.map((block, index) => {
+      if (index === blockIndex && block.type === 'interrupt') {
+        return { ...block, status: 'answered' }
+      }
+      return block
+    }) as StreamBlock[]
+    return { ...message, blocks }
+  })
+}
+
+/** 创建一条新的 assistant 流式消息，并返回它在 messages 中的位置。 */
+async function createAssistantStreamMessage(): Promise<number> {
+  messages.value.push({ role: 'assistant', content: '', reasoning: '', tool_calls: [], blocks: [], time: now() })
+  await scrollToBottom(true)
+  return messages.value.length - 1
+}
+
+/** 处理单条 Agent SSE 事件。 */
+function handleAgentStreamEvent(index: number, event: Record<string, any>) {
+  const data = (event.data || {}) as Record<string, any>
+
+  // 生命周期：运行开始，记录 run_id，方便后续做运行链路查看。
+  if (event.type === 'run_start' || event.type === 'resume_start') {
+    if (data.run_id) {
+      const last = messages.value[index]
+      if (last) messages.value[index] = { ...last, run_id: String(data.run_id) }
+    }
+    return
+  }
+
+  // 生命周期：Agent 装配完成，普通聊天页保持简洁，不直接展示。
+  if (event.type === 'agent_assembled') return
+
+  // 工具调用：模型发起一次新工具调用，按事件顺序加入时间线。
+  if (event.type === 'tool_call') {
+    appendToolCallBlock(index, data)
+    scrollToBottom()
+    return
+  }
+
+  // 工具结果：回填对应工具块，不进入正式回复正文。
+  if (event.type === 'tool_result') {
+    finishToolCallBlock(index, data)
+    scrollToBottom()
+    return
+  }
+
+  // 任务计划：规划工具写入 task_plan state 后，后端会推送完整快照。
+  if (event.type === 'task_plan') {
+    appendTaskPlanBlock(index, data)
+    scrollToBottom()
+    return
+  }
+
+  // 中断：渲染确认卡片，等待用户提交结构化 payload 恢复运行。
+  if (event.type === 'interrupt') {
+    appendInterruptBlock(index, data)
+    running.value = false
+    scrollToBottom()
+    return
+  }
+
+  // 思考过程：reasoning_delta 按顺序追加到时间线，连续思考自动合并。
+  if (event.type === 'reasoning_delta') {
+    const delta = String(data.content || event.delta || event.content || '')
+    appendReasoningBlock(index, delta)
+    scrollToBottom()
+    return
+  }
+
+  // 正式回复：model_delta 按顺序追加到时间线，连续回复自动合并。
+  if (event.type === 'model_delta') {
+    const delta = String(data.content || event.delta || event.content || '')
+    appendContentBlock(index, delta)
+    scrollToBottom()
+    return
+  }
+
+  // 生命周期：运行结束，记录耗时和最终状态。
+  if (event.type === 'run_end') {
+    markRunningTools(index, 'done')
+    const last = messages.value[index]
+    if (last) {
+      messages.value[index] = {
+        ...last,
+        elapsed_ms: typeof data.elapsed_ms === 'number' ? data.elapsed_ms : undefined,
+        answer_length: typeof data.answer_length === 'number' ? data.answer_length : undefined,
+      }
+    }
+    running.value = false
+    return
+  }
+
+  // 错误：展示错误信息，并关闭 loading。
+  if (event.type === 'error') {
+    messages.value[index] = {
+      ...messages.value[index],
+      content: messages.value[index].content
+        ? messages.value[index].content + `\n\n[错误] ${data.message || event.message || '未知错误'}`
+        : `[错误] ${data.message || event.message || '未知错误'}`,
+    }
+    markRunningTools(index, 'failed')
+    running.value = false
+  }
+}
+
+/** 以流式方式发送 Agent 消息。 */
+async function executeAgentStream(payload: Parameters<typeof runAgentStream>[0]) {
+  running.value = true
+  stickToBottom.value = true
+  const idx = await createAssistantStreamMessage()
+
+  await runAgentStream(
+    payload,
+    (event) => handleAgentStreamEvent(idx, event),
+    (err) => {
+      message.error('流式调用失败:' + err.message)
+      markRunningTools(idx, 'failed')
+      running.value = false
+    },
+    () => {
+      // 兜底：网络流结束时确保 loading 关闭；如果已经中断，按钮卡片仍会保留在消息中。
+      markRunningTools(idx, 'done')
+      running.value = false
+      scrollToBottom()
+    },
+  )
+}
+
+/** 查找当前会话里等待用户确认的任务计划中断卡片。 */
+function findWaitingPlanInterrupt(): { messageIndex: number; blockIndex: number; block: InterruptBlock } | null {
+  for (let messageIndex = messages.value.length - 1; messageIndex >= 0; messageIndex--) {
+    const messageItem = messages.value[messageIndex]
+    for (let blockIndex = messageItem.blocks.length - 1; blockIndex >= 0; blockIndex--) {
+      const block = messageItem.blocks[blockIndex]
+      if (block.type === 'interrupt' && block.status === 'waiting' && block.payload?.type === 'plan_confirmation') {
+        return { messageIndex, blockIndex, block }
+      }
+    }
+  }
+  return null
+}
+
+/** 发送运行请求。 */
 async function onRun() {
+  if (waitingPlanConfirmation.value) {
+    message.warning('请先处理任务计划确认卡片')
+    return
+  }
   if (!selectedAgentId.value) {
     message.warning('请先选择一个 Agent')
     return
@@ -613,115 +942,60 @@ async function onRun() {
 
   messages.value.push({ role: 'user', content: text, reasoning: '', tool_calls: [], blocks: [], time: now() })
   input.value = ''
-  running.value = true
-  stickToBottom.value = true
-  await scrollToBottom(true)
-
-  const payload = {
-    agent_id: selectedAgentId.value,
-    query: text,
-    conversation_id: conversationId.value,
-  }
 
   try {
-    messages.value.push({ role: 'assistant', content: '', reasoning: '', tool_calls: [], blocks: [], time: now() })
-    const idx = messages.value.length - 1
-    await runAgentStream(
-      payload,
-      (event) => {
-        const data = (event.data || {}) as Record<string, any>
-
-        // 生命周期:运行开始 - 拿到 run_id
-        if (event.type === 'run_start') {
-          if (data.run_id) {
-            // 在最后一条 assistant 消息里记录 run_id, 方便后续做"查看链路"操作
-            const last = messages.value[idx]
-            if (last) {
-              messages.value[idx] = { ...last, run_id: String(data.run_id) }
-            }
-          }
-          return
-        }
-
-        // 生命周期:Agent 装配完成 - 可选展示,这里只在调试态记录
-        if (event.type === 'agent_assembled') {
-          // 普通聊天界面不展示,保持界面简洁
-          // 如需展示可在 console 打印或塞入 metadata
-          return
-        }
-
-        // 工具调用:模型发起一次新工具调用,按事件顺序加入时间线。
-        if (event.type === 'tool_call') {
-          appendToolCallBlock(idx, data)
-          scrollToBottom()
-          return
-        }
-
-        // 工具结果:回填对应工具块,不进入正式回复正文。
-        if (event.type === 'tool_result') {
-          finishToolCallBlock(idx, data)
-          scrollToBottom()
-          return
-        }
-
-        // 思考过程:reasoning_delta 按顺序追加到时间线,连续思考自动合并。
-        if (event.type === 'reasoning_delta') {
-          const delta = String(data.content || event.delta || event.content || '')
-          appendReasoningBlock(idx, delta)
-          scrollToBottom()
-          return
-        }
-
-        // 正式回复:model_delta 按顺序追加到时间线,连续回复自动合并。
-        if (event.type === 'model_delta') {
-          const delta = String(data.content || event.delta || event.content || '')
-          appendContentBlock(idx, delta)
-          scrollToBottom()
-          return
-        }
-
-        // 生命周期:运行结束 - 标记完成, 记录耗时
-        if (event.type === 'run_end') {
-          markRunningTools(idx, 'done')
-          const last = messages.value[idx]
-          if (last) {
-            messages.value[idx] = {
-              ...last,
-              elapsed_ms: typeof data.elapsed_ms === 'number' ? data.elapsed_ms : undefined,
-              answer_length: typeof data.answer_length === 'number' ? data.answer_length : undefined,
-            }
-          }
-          running.value = false
-          return
-        }
-
-        // 错误:展示错误信息, 关闭 loading
-        if (event.type === 'error') {
-          messages.value[idx] = {
-            ...messages.value[idx],
-            content: messages.value[idx].content
-              ? messages.value[idx].content + `\n\n[错误] ${data.message || event.message || '未知错误'}`
-              : `[错误] ${data.message || event.message || '未知错误'}`,
-          }
-          // 错误时把未完成的工具调用标为 failed。
-          markRunningTools(idx, 'failed')
-          running.value = false
-        }
-      },
-      (err) => {
-        message.error('流式调用失败:' + err.message)
-        running.value = false
-      },
-      () => {
-        // 兜底:网络流结束时确保 loading 关闭
-        markRunningTools(idx, 'done')
-        running.value = false
-        scrollToBottom()
-      },
-    )
+    await executeAgentStream({
+      agent_id: selectedAgentId.value,
+      query: text,
+      conversation_id: ensureConversationId(),
+      message_type: 'text',
+      payload: {},
+    })
   } catch (e) {
     running.value = false
     message.error('调用失败')
+  }
+}
+
+/** 提交任务计划确认动作，并通过统一消息入口恢复被中断的 Agent。 */
+async function submitPlanConfirmation(messageIndex: number, blockIndex: number, action: 'approve' | 'revise' | 'cancel') {
+  if (running.value) return
+  const targetMessage = messages.value[messageIndex]
+  const targetBlock = targetMessage?.blocks[blockIndex]
+  if (!targetMessage || targetBlock?.type !== 'interrupt') return
+
+  const feedback = targetBlock.feedback.trim()
+  if (action === 'revise' && !feedback) {
+    message.warning('请输入修改意见')
+    return
+  }
+
+  const actionTextMap = {
+    approve: '确认执行任务计划',
+    revise: `修改任务计划：${feedback}`,
+    cancel: '取消任务计划',
+  }
+
+  markInterruptAnswered(messageIndex, blockIndex)
+  messages.value.push({ role: 'user', content: actionTextMap[action], reasoning: '', tool_calls: [], blocks: [], time: now() })
+
+  try {
+    await executeAgentStream({
+      agent_id: selectedAgentId.value,
+      query: actionTextMap[action],
+      conversation_id: ensureConversationId(),
+      message_type: action === 'revise' ? 'form_submit' : 'action_click',
+      payload: {
+        type: 'plan_confirmation',
+        data: {
+          action,
+          feedback: action === 'revise' ? feedback : undefined,
+        },
+      },
+    })
+  } catch (e) {
+    running.value = false
+    message.error('恢复执行失败')
   }
 }
 
@@ -1081,6 +1355,99 @@ onMounted(async () => {
   font-family: 'Fira Code', 'Cascadia Code', Menlo, Consolas, monospace;
 }
 
+
+/* ========== 任务计划与中断确认 ========== */
+.message-task-plan,
+.message-interrupt {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #5c3b00;
+}
+.plan-header,
+.interrupt-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.plan-title,
+.interrupt-title {
+  font-weight: 600;
+  color: #1f1f1f;
+}
+.plan-status,
+.interrupt-done {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(250, 140, 22, 0.12);
+  color: #d46b08;
+  font-size: 11px;
+}
+.plan-steps,
+.interrupt-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+.step-status {
+  flex-shrink: 0;
+  min-width: 58px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f5f5f5;
+  border: 1px solid #d9d9d9;
+  color: #595959;
+  text-align: center;
+  font-size: 11px;
+}
+.step-status-waiting {
+  background: #f5f5f5;
+  border-color: #d9d9d9;
+  color: #595959;
+}
+.step-status-running {
+  background: #e6f4ff;
+  border-color: #91caff;
+  color: #0958d9;
+}
+.step-status-done {
+  background: #f6ffed;
+  border-color: #b7eb8f;
+  color: #389e0d;
+}
+.step-status-failed {
+  background: #fff1f0;
+  border-color: #ffa39e;
+  color: #cf1322;
+}
+.step-title {
+  flex: 1;
+  color: #434343;
+  word-break: break-word;
+}
+.interrupt-actions {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #ffd591;
+}
+.interrupt-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* ========== 消息元信息 chip ========== */
 .message-meta-extras {
   display: flex;
@@ -1259,5 +1626,8 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+.hint-waiting {
+  color: #d46b08;
 }
 </style>

@@ -1,5 +1,5 @@
 /**
- * 默认布局：左侧菜单 + 顶部 Header + 内容区
+ * 默认布局：左侧菜单 + 内容区
  */
 <template>
   <a-layout class="min-h-screen">
@@ -18,17 +18,6 @@
     </a-layout-sider>
 
     <a-layout>
-      <!-- 顶部 Header -->
-      <a-layout-header class="layout-header">
-        <a-breadcrumb>
-          <a-breadcrumb-item>首页</a-breadcrumb-item>
-          <a-breadcrumb-item>{{ currentTitle }}</a-breadcrumb-item>
-        </a-breadcrumb>
-        <div class="header-right">
-          <a-tag color="blue">后端：{{ apiBase }}</a-tag>
-        </div>
-      </a-layout-header>
-
       <!-- 内容区 -->
       <a-layout-content class="layout-content">
         <slot />
@@ -45,8 +34,7 @@
 <script setup lang="ts">
 /**
  * 默认布局组件
- * - 左侧菜单：包含 10 个核心页面的导航
- * - 顶部：面包屑 + 后端地址
+ * - 左侧菜单：包含核心页面导航
  * - 内容区：slot 渲染 router-view
  */
 import { computed, ref, type Component } from 'vue'
@@ -99,12 +87,6 @@ const activeMenuKey = computed(() => {
   return matched?.path || route.path
 })
 
-// 当前页面标题
-const currentTitle = computed(() => (route.meta?.title as string) || '首页')
-
-// 后端 baseURL
-const apiBase = computed(() => (import.meta.env.VITE_API_BASE as string) || '/api')
-
 /** 点击菜单跳转 */
 function onMenuClick({ key }: { key: string }) {
   router.push(key)
@@ -137,30 +119,17 @@ function onMenuClick({ key }: { key: string }) {
 :deep(.ant-menu-item .menu-icon svg) {
   display: block;
 }
-.layout-header {
-  background: #fff;
-  padding: 0 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #f0f0f0;
-}
 .layout-content {
   margin: 16px;
   padding: 24px;
   background: #fff;
   border-radius: 8px;
-  min-height: calc(100vh - 64px - 70px - 32px);
+  min-height: calc(100vh - 70px - 32px);
 }
 .layout-footer {
   text-align: center;
   color: #999;
   font-size: 12px;
   padding: 16px;
-}
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 </style>

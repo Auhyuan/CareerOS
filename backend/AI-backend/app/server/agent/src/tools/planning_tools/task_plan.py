@@ -6,7 +6,20 @@ from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.types import Command
 
 
-VALID_STEP_STATUSES = {"todo", "running", "completed", "skipped", "blocked"}
+VALID_STEP_STATUSES = {"waiting", "running", "done", "failed"}
+
+
+def _normalize_step_status(status: str | None) -> str:
+    """标准化任务步骤状态。
+
+    Args:
+        status: 模型传入的原始状态。
+
+    Returns:
+        平台内部使用的步骤状态；非法状态统一回退为 waiting。
+    """
+    cleaned_status = str(status or "").strip().lower()
+    return cleaned_status if cleaned_status in VALID_STEP_STATUSES else "waiting"
 
 
 def _get_current_task_plan(runtime: ToolRuntime) -> dict[str, Any] | None:
@@ -65,9 +78,7 @@ def _normalize_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         step_id = str(raw_step.get("step_id") or f"step_{index}").strip()
         description = str(raw_step.get("description") or "").strip()
-        status = str(raw_step.get("status") or "todo").strip()
-        if status not in VALID_STEP_STATUSES:
-            status = "todo"
+        status = _normalize_step_status(raw_step.get("status"))
 
         normalized_steps.append({
             "step_id": step_id,
@@ -107,8 +118,8 @@ def _merge_step_update(
         raise RuntimeError("step_id 不能为空")
 
     cleaned_status = status.strip() if isinstance(status, str) and status.strip() else None
-    if cleaned_status is not None and cleaned_status not in VALID_STEP_STATUSES:
-        raise RuntimeError(f"非法步骤状态: {cleaned_status}")
+    if cleaned_status is not None:
+        cleaned_status = _normalize_step_status(cleaned_status)
 
     steps = list(task_plan.get("steps") or [])
     matched = False
@@ -130,7 +141,7 @@ def _merge_step_update(
 
     updated_plan = dict(task_plan)
     updated_plan["steps"] = updated_steps
-    if updated_steps and all(step.get("status") in {"completed", "skipped"} for step in updated_steps):
+    if updated_steps and all(step.get("status") == "done" for step in updated_steps):
         updated_plan["status"] = "completed"
     return updated_plan
 
@@ -155,8 +166,7 @@ async def set_task_plan(title: str, steps: list[dict[str, Any]], runtime: ToolRu
                 "messages": [
                     _build_tool_message(runtime, f"当前任务计划状态为 {current_status}，不能重写整体计划。")
                 ]
-            },
-            goto="model",
+            }
         )
 
     cleaned_title = title.strip() if isinstance(title, str) else ""
@@ -177,9 +187,8 @@ async def set_task_plan(title: str, steps: list[dict[str, Any]], runtime: ToolRu
                 "type": "plan_confirmation",
                 "data": {"task_plan": task_plan},
             },
-            "messages": [_build_tool_message(runtime, "任务计划草稿已生成，已暂停等待用户确认。")],
-        },
-        goto="model",
+            "messages": [_build_tool_message(runtime, "任务计划已生成")],
+        }
     )
 
 
@@ -196,7 +205,7 @@ async def update_task_step(
     Args:
         step_id: 需要更新的步骤 ID。
         runtime: LangGraph 注入的工具运行时，用于读取当前任务计划。
-        status: 新步骤状态，可选值 todo/running/completed/skipped/blocked。
+        status: 新步骤状态，可选值 waiting/running/done/failed。
         result: 步骤执行结果。
         note: 步骤备注或阻塞原因。
 
@@ -232,10 +241,14 @@ async def update_task_step(
         note=note,
     )
 
+    tool_message = f"任务步骤 {step_id} 已更新。"
+    if updated_plan.get("status") == "completed":
+        tool_message = "任务步骤已更新，任务计划已经全部完成。"
+
     return Command(
         update={
             "task_plan": updated_plan,
-            "messages": [_build_tool_message(runtime, f"任务步骤 {step_id} 已更新。")],
+            "messages": [_build_tool_message(runtime, tool_message)],
         },
         goto="model",
     )

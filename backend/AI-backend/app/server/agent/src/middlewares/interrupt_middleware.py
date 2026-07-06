@@ -40,7 +40,7 @@ class InterruptMiddleware(AgentMiddleware[InterruptState]):
     state_schema = InterruptState
 
     def before_model(self, state: InterruptState, runtime: Any) -> dict[str, Any] | None:
-        """在每次模型调用前检查是否需要中断。
+        """在每次模型调用前检查是否需要中断（同步版）。
 
         Args:
             state: 当前 LangGraph state。
@@ -59,13 +59,20 @@ class InterruptMiddleware(AgentMiddleware[InterruptState]):
         # 用户通过 Command(resume=...) 恢复后，该函数会重新执行，并从这里拿到 raw_resume_value。
         raw_resume_value = interrupt(payload)
         resume_value = self._normalize_resume_value(payload, raw_resume_value)
-        logger.info("Agent 中断已恢复: type=%s", resume_value.get("type"))
 
         return {
             "interrupt_enabled": False,
             "interrupt_payload": None,
             "resume_value": resume_value,
         }
+
+    async def abefore_model(self, state: InterruptState, runtime: Any) -> dict[str, Any] | None:
+        """在每次模型调用前检查是否需要中断（异步版）。
+
+        LangGraph 在 astream/ainvoke 等异步上下文中会优先调用 abefore_model。
+        当前实现直接委托给同步版，避免维护两套逻辑。
+        """
+        return self.before_model(state, runtime)
 
     def _normalize_interrupt_payload(self, payload: object) -> dict[str, Any]:
         """规范化中断 payload，保证传给前端的是 {type, data} 结构。

@@ -2,6 +2,7 @@ import logging
 import time
 from typing import Any, AsyncIterator
 
+from langgraph.errors import GraphInterrupt
 from sqlmodel import Session
 
 from app.server.agent.src.agent.assembler import AgentAssembler
@@ -139,6 +140,20 @@ class AgentService:
                 config={"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50},
                 context=context.to_langchain_context(),
             )
+        except GraphInterrupt:
+            # GraphInterrupt 是 LangGraph 正常的人机交互中断机制，不是错误。
+            # 非流式路径下 ainvoke 不会内部捕获它，需要在这里兜底处理。
+            elapsed_ms = (time.perf_counter() - run_started_at) * 1000
+            if run_record_enabled and db is not None:
+                self.run_service.mark_interrupted(
+                    db,
+                    run_id=context.run_id,
+                    interrupt_type="unknown",
+                    interrupt_payload=None,
+                    elapsed_ms=elapsed_ms,
+                )
+            # 重新抛出，让 API 层感知到中断并返回给前端。
+            raise
         except Exception as error:
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             logger.exception(
@@ -340,6 +355,50 @@ class AgentService:
                     "answer_length": len(answer),
                 },
             }
+        except GraphInterrupt as error:
+            # astream 在部分 LangGraph 版本中可能不会内部捕获 middleware before_model
+            # 中触发的 GraphInterrupt，这里作为兜底安全网：把它当作正常中断而非错误。
+            elapsed_ms = (time.perf_counter() - run_started_at) * 1000
+            interrupt_event = self.stream_parser.extract_interrupt_event_from_error(
+                error,
+                context.run_id,
+                context.thread_id,
+            )
+            if interrupt_event is not None:
+                interrupted_payload = (interrupt_event.get("data") or {}).get("payload")
+                yield interrupt_event
+                # 兜底提取 task_plan（astream updates 路径没走到时，这里补发）。
+                task_plan_event = self.stream_parser.extract_task_plan_event_from_interrupt(
+                    interrupt_event,
+                    context.run_id,
+                    context.thread_id,
+                )
+                if task_plan_event is not None:
+                    yield task_plan_event
+            else:
+                interrupted_payload = None
+
+            interrupt_type = str(interrupted_payload.get("type") or "unknown") if isinstance(interrupted_payload, dict) else "unknown"
+            if run_record_enabled and db is not None:
+                self.run_service.mark_interrupted(
+                    db,
+                    run_id=context.run_id,
+                    interrupt_type=interrupt_type,
+                    interrupt_payload=interrupted_payload,
+                    elapsed_ms=elapsed_ms,
+                )
+            yield {
+                "type": "run_end",
+                "data": {
+                    "run_id": context.run_id,
+                    "thread_id": context.thread_id,
+                    "status": "interrupted",
+                    "interrupt_type": interrupt_type,
+                    "elapsed_ms": elapsed_ms,
+                    "answer_length": len("".join(answer_parts)),
+                },
+            }
+            return
         except Exception as error:
             elapsed_ms = (time.perf_counter() - run_started_at) * 1000
             logger.exception(

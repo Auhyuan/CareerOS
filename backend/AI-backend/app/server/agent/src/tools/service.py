@@ -151,9 +151,15 @@ class AgentToolService:
 
         tools = [self.registry.get_tool(name) for name in builtin_tool_names]
         if mcp_tool_codes:
-            if db is None:
-                raise RuntimeError("MCP 工具加载需要数据库会话")
-            tools.extend(await self.mcp_service.load_langchain_tools(db, mcp_tool_codes))
+            if db is not None:
+                tools.extend(await self.mcp_service.load_langchain_tools(db, mcp_tool_codes))
+            else:
+                # A2A 子 Agent 等内部调用场景可能不传 db，此时短暂打开一个
+                # 只读会话，仅用于加载 MCP 工具配置，不写业务会话记录。
+                from app.common.db.postgres_db import get_db_session
+
+                with get_db_session() as inner_db:
+                    tools.extend(await self.mcp_service.load_langchain_tools(inner_db, mcp_tool_codes))
         return tools
 
     async def invoke_tool(self, tool_name: str, args: dict[str, Any], db: Session | None = None) -> Any:

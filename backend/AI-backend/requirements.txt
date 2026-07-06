@@ -16,15 +16,15 @@ psycopg==3.3.4
 psycopg-binary==3.3.4
 
 # Agent / LLM / LangGraph
-langchain==1.3.8
-langchain-core==1.4.6
-langchain-openai==1.0.3
+langchain==1.3.11
+langchain-core==1.4.8
+langchain-openai==1.3.3
 langchain-mcp-adapters==0.3.0
-langgraph==1.2.4
+langgraph==1.2.7
 langgraph-checkpoint-postgres==3.1.0
 langgraph-prebuilt==1.1.0
-langsmith==0.8.14
-openai==2.41.1
+langsmith==0.9.7
+openai==2.44.0
 
 # Tooling / config / HTTP
 httpx==0.28.1

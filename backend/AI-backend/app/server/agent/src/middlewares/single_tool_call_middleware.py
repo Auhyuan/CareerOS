@@ -1,10 +1,13 @@
 """限制单轮模型响应最多保留一个工具调用。"""
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 logger = logging.getLogger(__name__)
@@ -16,6 +19,35 @@ class SingleToolCallMiddleware(AgentMiddleware[AgentState]):
     def __init__(self, enabled: bool = True):
         """初始化单工具调用限制中间件。"""
         self.enabled = enabled
+
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        """在模型调用前注入单工具顺序调用规则。
+
+        Args:
+            request: LangChain 模型调用请求。
+            handler: 后续模型调用处理器。
+
+        Returns:
+            模型调用结果。
+        """
+        if not self.enabled:
+            return await handler(request)
+
+        rule_prompt = (
+            "<single_tool_call_rule>\n"
+            "工具调用规则：调用工具时必须一个一个调用。"
+            "等待当前工具执行完成并看到工具结果后，再决定是否调用下一个工具。"
+            "不要在同一轮模型响应中并行发起多个工具调用。\n"
+            "</single_tool_call_rule>"
+        )
+        current_prompt = getattr(request.system_message, "content", "")
+        new_system = SystemMessage(content=f"{current_prompt}\n\n{rule_prompt}")
+        return await handler(request.override(system_message=new_system))
 
     def _clip_tool_calls(self, state: AgentState) -> dict[str, Any] | None:
         """检查最后一条 AI 消息，若存在多个工具调用则只保留第一个。"""
