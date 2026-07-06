@@ -153,7 +153,7 @@ Agent 在执行复杂任务时，经常需要暂停等待用户参与，例如�
   "type": "tool_approval",
   "data": {
     "title": "请确认工具操作",
-    "tool_name": "create_job_skill",
+    "tool_name": "create_job_skills",
     "args": {}
   }
 }

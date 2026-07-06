@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.common.db.postgres_db import get_db_session
-from app.server.job.src.schemas.job_skill import JobSkillCreateRequest, JobSkillSearchRequest
+from app.server.job.src.schemas.job_skill import JobSkillBatchCreateRequest, JobSkillSearchRequest
 from app.server.job.src.service.job_skill_service import JobSkillService
 
 
@@ -36,23 +36,23 @@ def register_job_skill_tools(mcp: Any) -> None:
         return result.model_dump(mode="json")
 
     @mcp.tool(
-        name="create_job_skill",
+        name="create_job_skills",
         description=(
-            "当 search_job_skills 没有找到语义相同的技能时，创建新的平台岗位技能。"
-            "如果标准化名称已存在，会复用已有技能，并返回 created=false。"
+            "当 search_job_skills 没有找到语义相同的技能时，批量创建新的平台岗位技能。"
+            "参数 skills 是数组，每一项包含 name 和 description。"
+            "如果标准化名称已存在，会复用已有技能，并在 results 中返回 created=false。"
         ),
     )
-    async def create_job_skill(name: str, description: str) -> dict[str, Any]:
-        """创建或复用平台岗位技能。
+    async def create_job_skills(skills: list[dict[str, str]]) -> dict[str, Any]:
+        """批量创建或复用平台岗位技能。
 
         Args:
-            name: 技能标准名称。
-            description: 简洁的技能描述。
+            skills: 技能列表；每项需要包含 name 和 description。
 
         Returns:
-            可 JSON 序列化的技能信息和是否新建标记。
+            可 JSON 序列化的批量创建结果，包含每条技能的 ID 和 created 标记。
         """
-        request = JobSkillCreateRequest(name=name, description=description)
+        request = JobSkillBatchCreateRequest(items=skills)
         with get_db_session() as db:
-            result = service.create_skill(db, request)
+            result = service.batch_create_skills(db, request)
         return result.model_dump(mode="json")

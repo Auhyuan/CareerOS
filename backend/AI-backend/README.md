@@ -21,7 +21,7 @@ sql/                   # 能力层数据库脚本
 
 ```text
 search_job_skills
-create_job_skill
+create_job_skills
 ```
 
 工具通过 `ORCHESTRATION_BASE_URL` 调用业务编排层，不直接访问 Job 数据库。Agent 模板必须在 `config.tools` 中明确声明需要的工具；空数组表示不装配工具。

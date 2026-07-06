@@ -40,7 +40,7 @@ Agent 组装流程（`AgentAssembler.assemble`）负责**基础能力**：模型
   "agent_name": "岗位画像生成 Agent",
   "config": {
     "system_prompt": "...",
-    "tools": ["create_job_skill"],
+    "tools": ["create_job_skills"],
     "is_sub_agent": true,
     ...
   }
@@ -364,13 +364,13 @@ async def _load_sub_agent_metas(
 ```
 a2a_call._run(agent_id="job_profile_agent", query="基于以下JD生成画像...")
   ├── 查模板 DB: agent_id="job_profile_agent"
-  │     → system_prompt, tools=["create_job_skill"], etc.
+  │     → system_prompt, tools=["create_job_skills"], etc.
   ├── 构造 AgentRunRequest:
   │     query="基于以下JD生成画像..."
   │     conversation_id=None     ← 无状态
   │     stream=False
   │     a2a=None                 ← 禁止嵌套
-  │     tools=["create_job_skill"]
+  │     tools=["create_job_skills"]
   ├── 创建临时 AgentService
   ├── await agent_service.run(request)
   │     → AgentAssembler.assemble()  [不加载 A2A]

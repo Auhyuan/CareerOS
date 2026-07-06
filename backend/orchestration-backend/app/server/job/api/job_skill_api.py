@@ -4,6 +4,8 @@ from sqlmodel import Session
 from app.common.db.postgres_db import get_postgres_engine
 from app.common.schemas.result import Result
 from app.server.job.src.schemas.job_skill import (
+    JobSkillBatchCreateRequest,
+    JobSkillBatchCreateResponse,
     JobSkillBatchDeleteRequest,
     JobSkillBatchDeleteResponse,
     JobSkillCreateRequest,
@@ -53,6 +55,25 @@ def create_job_skill(
         统一响应结构，data 中包含技能和是否新建的标记。
     """
     result = job_skill_service.create_skill(db, request)
+    return Result.success(result)
+
+
+@router.post("/batch-create", response_model=Result[JobSkillBatchCreateResponse], summary="批量创建岗位技能")
+def batch_create_job_skills(
+    request: JobSkillBatchCreateRequest,
+    db: Session = Depends(get_postgres_engine),
+):
+    """
+    批量创建岗位技能；标准化名称已存在时直接复用已有技能。
+
+    Args:
+        request: 批量技能创建请求。
+        db: PostgreSQL 数据库会话。
+
+    Returns:
+        统一响应结构，data 中包含批量创建 / 复用结果。
+    """
+    result = job_skill_service.batch_create_skills(db, request)
     return Result.success(result)
 
 

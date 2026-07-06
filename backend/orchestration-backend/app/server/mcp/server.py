@@ -25,7 +25,7 @@ def create_mcp_server(config: MCPConfig | None = None) -> Any | None:
 
     mcp = FastMCP(runtime_config.mcp_service_name)
     register_job_skill_tools(mcp)
-    logger.info("MCP 工具注册完成: names=['search_job_skills', 'create_job_skill']")
+    logger.info("MCP 工具注册完成: names=['search_job_skills', 'create_job_skills']")
     return mcp
 
 

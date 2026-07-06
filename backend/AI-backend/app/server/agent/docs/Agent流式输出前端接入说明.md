@@ -221,7 +221,7 @@ interface AgentSseEvent<T = unknown> {
     "run_id": "xxx",
     "model_code": "chat_main",
     "tool_count": 2,
-    "tools": ["job.search_job_skills", "job.create_job_skill"],
+    "tools": ["job.search_job_skills", "job.create_job_skills"],
     "middlewares": ["ToolLoggingMiddleware"],
     "checkpointer_enabled": true
   }

@@ -79,6 +79,47 @@ class JobSkillCreateResponse(BaseModel):
     created: bool = Field(description="本次是否创建了新技能")
 
 
+class JobSkillBatchCreateRequest(BaseModel):
+    """岗位技能批量创建请求。"""
+
+    items: list[JobSkillCreateRequest] = Field(
+        min_length=1,
+        max_length=100,
+        description="待创建或复用的岗位技能列表，单次最多 100 条",
+    )
+
+    @field_validator("items")
+    @classmethod
+    def dedupe_items(cls, value: list[JobSkillCreateRequest]) -> list[JobSkillCreateRequest]:
+        """
+        按技能名称清理重复项，避免同一次请求重复创建同一个技能。
+
+        Args:
+            value: 调用方传入的技能创建列表。
+
+        Returns:
+            按名称去重后的技能创建列表。
+        """
+        seen_names: set[str] = set()
+        unique_items: list[JobSkillCreateRequest] = []
+        for item in value:
+            key = item.name.strip().casefold()
+            if key in seen_names:
+                continue
+            seen_names.add(key)
+            unique_items.append(item)
+        return unique_items
+
+
+class JobSkillBatchCreateResponse(BaseModel):
+    """岗位技能批量创建结果。"""
+
+    requested: int = Field(description="请求中包含的技能数量（按名称去重后）")
+    created: int = Field(description="本次实际新建的技能数量")
+    reused: int = Field(description="本次复用已有技能的数量")
+    results: list[JobSkillCreateResponse] = Field(default_factory=list, description="每个技能的创建或复用结果")
+
+
 class JobSkillBatchDeleteRequest(BaseModel):
     """岗位技能批量删除请求。"""
 

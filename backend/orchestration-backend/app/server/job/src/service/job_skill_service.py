@@ -5,6 +5,8 @@ from sqlmodel import Session
 
 from app.server.job.src.repository.job_skill_repository import JobSkillRepository
 from app.server.job.src.schemas.job_skill import (
+    JobSkillBatchCreateRequest,
+    JobSkillBatchCreateResponse,
     JobSkillBatchDeleteRequest,
     JobSkillBatchDeleteResponse,
     JobSkillCreateRequest,
@@ -73,6 +75,37 @@ class JobSkillService:
         return JobSkillCreateResponse(
             skill=JobSkillResponse.model_validate(skill),
             created=created,
+        )
+
+    def batch_create_skills(self, db: Session, request: JobSkillBatchCreateRequest) -> JobSkillBatchCreateResponse:
+        """
+        批量创建或复用岗位技能。
+
+        Args:
+            db: 数据库会话。
+            request: 批量技能创建请求。
+
+        Returns:
+            批量创建结果，包含每条技能的创建 / 复用状态。
+        """
+        results: list[JobSkillCreateResponse] = []
+        created_count = 0
+        reused_count = 0
+
+        # 复用单条创建逻辑，确保标准化名称、唯一性判断和返回结构保持一致。
+        for item in request.items:
+            result = self.create_skill(db, item)
+            results.append(result)
+            if result.created:
+                created_count += 1
+            else:
+                reused_count += 1
+
+        return JobSkillBatchCreateResponse(
+            requested=len(request.items),
+            created=created_count,
+            reused=reused_count,
+            results=results,
         )
 
     def delete_skills(self, db: Session, request: JobSkillBatchDeleteRequest) -> JobSkillBatchDeleteResponse:

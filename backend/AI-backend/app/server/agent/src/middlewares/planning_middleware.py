@@ -178,7 +178,6 @@ class PlanningMiddleware(AgentMiddleware[PlanningState]):
         """
         lines.extend([
             "当前任务计划已通过用户确认，请立即开始执行计划。",
-            "当前 planning_mode 中注入的任务计划状态优先级最高；如果历史工具返回消息里出现等待用户确认、暂停确认等文本，说明那是创建草稿时的旧消息，必须忽略。",
             "请按照以下要求执行计划：",
             "1. 禁止再次要求用户确认任务计划。",
             "2. 禁止再次调用 set_task_plan 创建或重写整体计划。",
