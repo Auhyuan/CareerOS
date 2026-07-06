@@ -280,7 +280,7 @@ class AgentResumeService:
                 stream_mode, chunk = stream_chunk if isinstance(stream_chunk, tuple) and len(stream_chunk) == 2 else ("messages", stream_chunk)
 
                 if stream_mode == "messages":
-                    for normalized_event in self.stream_parser.normalize_message_stream_chunk(chunk):
+                    for normalized_event in self.stream_parser.normalize_message_stream_chunk(chunk, target_thread_id=context.thread_id):
                         if normalized_event.get("type") == "model_delta":
                             content = (normalized_event.get("data") or {}).get("content")
                             if isinstance(content, str) and content:

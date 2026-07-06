@@ -185,7 +185,7 @@ class PlanningMiddleware(AgentMiddleware[PlanningState]):
             "3. 必须严格按照任务计划任务顺序执行，从第一个 waiting 或 running 任务开始。",
             "4. 开始执行某个任务前，必须先调用 update_task_step，将该任务状态设置为 running。",
             "5. 执行任务时可以调用子 Agent 或其他工具，但拿到工具结果后，先调用 update_task_step 记录任务结果，不要先输出完整最终总结。",
-            "6. 某个任务执行成功后，必须立刻调用 update_task_step，将该任务状态设置为 done，并在 result 中写清执行结果。",
+            "6. 某个任务执行完成后，必须调用 update_task_step，将该任务状态设置为 done，并在 result 中写清执行结果。",
             "7. 如果某个任务执行失败，必须调用 update_task_step，将该任务状态设置为 failed，并在 note 或 result 中写清失败原因。然后直接回复用户：任务执行失败，原因：具体原因。不继续执行剩余任务。",
             "8. update_task_step 只用于更新单个任务，不允许通过它重写整体计划。",
             "9. 只有当任务计划状态变为 completed 后，才输出面向用户的最终总结。",

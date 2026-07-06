@@ -76,10 +76,16 @@ class AgentModelService:
         )
 
         extra_config = dict(definition.extra_config or {})
+        model_kwargs = dict(extra_config.pop("model_kwargs", {}) or {})
+        # OpenAI 兼容接口默认允许模型一次返回多个工具调用。
+        # 我们的 Agent 需要按顺序执行工具，尤其是 A2A 子 Agent 调用必须等待结果返回后，
+        # 主 Agent 才能继续更新任务计划或进入下一步，因此这里默认关闭并行工具调用。
+        model_kwargs.setdefault("parallel_tool_calls", False)
         logger.info(
-            "聊天模型额外配置: model_code=%s extra_keys=%s",
+            "聊天模型额外配置: model_code=%s extra_keys=%s model_kwargs_keys=%s",
             definition.model_code,
             sorted(extra_config.keys()),
+            sorted(model_kwargs.keys()),
         )
 
         chat_model = ReasoningChatOpenAI(
@@ -89,6 +95,7 @@ class AgentModelService:
             temperature=temperature,
             timeout=effective_timeout,
             max_retries=max_retries,
+            model_kwargs=model_kwargs,
             **extra_config,
         )
         logger.info("聊天模型初始化完成: model_code=%s model_name=%s", definition.model_code, definition.model_name)

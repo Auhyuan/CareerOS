@@ -13,17 +13,21 @@ class AgentStreamEventParser:
     不关心 Agent 运行、数据库写入、会话持久化等业务流程。
     """
 
-    def normalize_message_stream_chunk(self, chunk: Any) -> list[dict[str, Any]]:
+    def normalize_message_stream_chunk(self, chunk: Any, target_thread_id: str | None = None) -> list[dict[str, Any]]:
         """将 LangGraph messages 流分片转换为平台 SSE 事件。
 
         Args:
             chunk: agent.astream(stream_mode="messages") 产出的分片，通常是 (message, metadata)。
+            target_thread_id: 当前对外流式响应所属的主 Agent thread_id。
 
         Returns:
             可序列化的平台事件列表。一个消息分片可能同时包含思考、正文和工具调用。
         """
         message, metadata = self.unpack_message_stream_chunk(chunk)
         if message is None:
+            return []
+
+        if not self.should_forward_message_chunk(metadata, target_thread_id):
             return []
 
         self.log_raw_stream_chunk(message, metadata)
@@ -86,6 +90,63 @@ class AgentStreamEventParser:
         if isinstance(chunk, dict):
             return chunk.get("message") or chunk.get("chunk") or chunk.get("messages"), chunk.get("metadata")
         return chunk, None
+
+    def should_forward_message_chunk(self, metadata: Any, target_thread_id: str | None) -> bool:
+        """判断当前 messages 分片是否应该转发给前端。
+
+        Args:
+            metadata: LangGraph messages 流分片携带的元数据。
+            target_thread_id: 当前主 Agent 对外响应使用的 thread_id。
+
+        Returns:
+            属于当前主 Agent 或无法识别归属时返回 True；明确属于其他 thread 时返回 False。
+        """
+        if not target_thread_id:
+            return True
+
+        metadata_thread_id = self.extract_metadata_thread_id(metadata)
+        if not metadata_thread_id:
+            return True
+
+        if metadata_thread_id == target_thread_id:
+            return True
+
+        logger.debug(
+            "跳过非当前 thread 的流式分片: target_thread_id=%s metadata_thread_id=%s",
+            target_thread_id,
+            metadata_thread_id,
+        )
+        return False
+
+    def extract_metadata_thread_id(self, metadata: Any) -> str | None:
+        """从 LangGraph messages 元数据中提取 thread_id。
+
+        Args:
+            metadata: LangGraph messages 流分片携带的元数据。
+
+        Returns:
+            提取到的 thread_id；不存在时返回 None。
+        """
+        if metadata is None:
+            return None
+
+        if hasattr(metadata, "model_dump"):
+            metadata = metadata.model_dump()
+
+        if not isinstance(metadata, dict):
+            return None
+
+        candidates = [
+            metadata.get("thread_id"),
+            (metadata.get("configurable") or {}).get("thread_id") if isinstance(metadata.get("configurable"), dict) else None,
+        ]
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            value = str(candidate).strip()
+            if value:
+                return value
+        return None
 
 
     def log_raw_stream_chunk(self, message: Any, metadata: Any) -> None:
