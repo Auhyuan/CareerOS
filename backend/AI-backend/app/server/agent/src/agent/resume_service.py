@@ -269,23 +269,32 @@ class AgentResumeService:
             }
 
             answer_parts: list[str] = []
+            suppress_sub_agent_messages = context.inputs.get("_stream_scope") != "sub_agent"
             interrupted_payload: dict[str, Any] | None = None
             last_task_plan_signature: str | None = None
             async for stream_chunk in assembly.agent.astream(
                 Command(resume=request.resume_value),
                 config={"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50},
                 context=context.to_langchain_context(),
-                stream_mode=["messages", "updates"],
+                stream_mode=["messages", "updates", "custom"],
             ):
                 stream_mode, chunk = stream_chunk if isinstance(stream_chunk, tuple) and len(stream_chunk) == 2 else ("messages", stream_chunk)
 
                 if stream_mode == "messages":
-                    for normalized_event in self.stream_parser.normalize_message_stream_chunk(chunk, target_thread_id=context.thread_id):
+                    for normalized_event in self.stream_parser.normalize_message_stream_chunk(
+                        chunk,
+                        suppress_sub_agent=suppress_sub_agent_messages,
+                    ):
                         if normalized_event.get("type") == "model_delta":
                             content = (normalized_event.get("data") or {}).get("content")
                             if isinstance(content, str) and content:
                                 answer_parts.append(content)
                         yield normalized_event
+                    continue
+
+                if stream_mode == "custom":
+                    if isinstance(chunk, dict):
+                        yield chunk
                     continue
 
                 if stream_mode == "updates":

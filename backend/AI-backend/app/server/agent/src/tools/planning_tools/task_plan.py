@@ -148,7 +148,7 @@ def _merge_step_update(
 
 @tool("set_task_plan")
 async def set_task_plan(title: str, steps: list[dict[str, Any]], runtime: ToolRuntime) -> Command:
-    """创建或重写规划模式的任务计划草稿，并触发用户确认中断。
+    """创建或重写规划模式的任务计划草稿。
 
     Args:
         title: 任务计划标题。
@@ -160,11 +160,12 @@ async def set_task_plan(title: str, steps: list[dict[str, Any]], runtime: ToolRu
     """
     current_plan = _get_current_task_plan(runtime)
     current_status = str((current_plan or {}).get("status") or "").strip()
-    if current_status and current_status != "draft":
+    if current_status == "running":
+        # 只有运行中的计划禁止整体重写，避免模型在执行过程中打乱已确认的任务步骤。
         return Command(
             update={
                 "messages": [
-                    _build_tool_message(runtime, f"当前任务计划状态为 {current_status}，不能重写整体计划。")
+                    _build_tool_message(runtime, "当前任务计划正在执行中，不能重写整体计划。请先完成或停止当前计划。")
                 ]
             }
         )
@@ -187,7 +188,13 @@ async def set_task_plan(title: str, steps: list[dict[str, Any]], runtime: ToolRu
                 "type": "plan_confirmation",
                 "data": {"task_plan": task_plan},
             },
-            "messages": [_build_tool_message(runtime, "任务计划已生成")],
+            # 工具只负责写入任务计划和触发确认中断；后续执行规则统一以 <planning_mode> 注入内容为准。
+            "messages": [
+                _build_tool_message(
+                    runtime,
+                    "任务计划已创建成功，具体状态和下一步动作请以 <planning_mode> 中的系统提示为准。",
+                )
+            ],
         }
     )
 

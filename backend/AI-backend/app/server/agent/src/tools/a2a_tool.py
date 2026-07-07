@@ -5,13 +5,10 @@ import time
 from uuid import uuid4
 
 from langchain_core.tools import tool
+from langgraph.config import get_stream_writer
 from langgraph.prebuilt.tool_node import ToolRuntime
 
 logger = logging.getLogger(__name__)
-
-
-
-
 
 
 def _mark_agent_run_success(run_id: str, output_text: str, elapsed_ms: float) -> None:
@@ -48,7 +45,7 @@ def _mark_agent_run_failed(run_id: str, error_message: str, elapsed_ms: float) -
 async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
     """调用子 Agent 执行子任务。
 
-    这个工具只负责"主 Agent 调用子 Agent"的第一版闭环，不做流式转发。
+    这个工具会在内部流式运行子 Agent，并把子 Agent 过程包装为 sub_agent_event 写入 custom 流。
     子 Agent 返回完整文本后，主 Agent 再把结果整合进最终回答。
 
     安全边界：
@@ -61,6 +58,7 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
     Args:
         agent_id: 要调用的子 Agent 模板 ID。
         query: 传给子 Agent 的完整任务说明。
+        runtime: LangGraph 注入的工具运行时，用于读取父级上下文和 tool_call_id。
 
     Returns:
         子 Agent 的最终文本回答；校验失败或调用失败时返回错误说明文本。
@@ -71,18 +69,18 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
     from app.server.agent.src.schemas.request import AgentOptionalFeatures, AgentRunRequest
     from app.server.agent.src.templates.service import AgentTemplateService
 
-    # 从 runtime context 提取父级运行信息（仅用于追踪，不做白名单校验）
     parent_conversation_id = None
     parent_run_id = None
+    parent_tool_call_id = getattr(runtime, "tool_call_id", None) if runtime is not None else None
     if runtime is not None:
         ctx = getattr(runtime, "context", None) or {}
         if isinstance(ctx, dict):
             parent_conversation_id = str(ctx.get("thread_id") or "") or None
             parent_run_id = str(ctx.get("run_id") or "") or None
         elif hasattr(ctx, "model_dump"):
-            d = ctx.model_dump()
-            parent_conversation_id = str(d.get("thread_id") or "") or None
-            parent_run_id = str(d.get("run_id") or "") or None
+            context_data = ctx.model_dump()
+            parent_conversation_id = str(context_data.get("thread_id") or "") or None
+            parent_run_id = str(context_data.get("run_id") or "") or None
 
     sub_run_id = uuid4().hex
     sub_started_at = time.perf_counter()
@@ -116,6 +114,13 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
         query=query,
         conversation_id=None,
         system_prompt=config.system_prompt,
+        inputs={
+            "_stream_scope": "sub_agent",
+            "_sub_run_id": sub_run_id,
+            "_sub_agent_id": agent_id,
+            "_parent_run_id": parent_run_id,
+            "_parent_conversation_id": parent_conversation_id,
+        },
         tools=list(config.tools or []),
         optional_features=AgentOptionalFeatures(long_term_memory_enabled=False),
         runtime_options=config.runtime_options,
@@ -124,12 +129,55 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
 
     sub_service = AgentService()
     try:
-        response = await sub_service.run(sub_request, db=None)
+        writer = get_stream_writer()
+    except RuntimeError:
+        # 非流式调用时可能不存在 LangGraph custom stream writer，此时只返回最终工具结果。
+        writer = lambda _: None
+    answer_parts: list[str] = []
+
+    def write_sub_agent_event(event: dict) -> None:
+        """把子 Agent 标准事件包装成 sub_agent_event 并写入 custom 流。
+
+        Args:
+            event: 子 Agent 内部 stream() 产出的标准事件。
+        """
+        writer({
+            "type": "sub_agent_event",
+            "data": {
+                "parent_run_id": parent_run_id,
+                "parent_conversation_id": parent_conversation_id,
+                "parent_tool_call_id": parent_tool_call_id,
+                "sub_run_id": sub_run_id,
+                "agent_id": agent_id,
+                "event": event,
+            },
+        })
+
+    try:
+        async for event in sub_service.stream(sub_request, db=None):
+            # 子 Agent 自己产出的标准事件统一包成 sub_agent_event 交给前端。
+            write_sub_agent_event(event)
+            if event.get("type") == "model_delta":
+                content = (event.get("data") or {}).get("content")
+                if isinstance(content, str) and content:
+                    answer_parts.append(content)
+
+        answer = "".join(answer_parts)
         elapsed_ms = (time.perf_counter() - sub_started_at) * 1000
-        _mark_agent_run_success(sub_run_id, response.answer, elapsed_ms)
-        return response.answer
+        _mark_agent_run_success(sub_run_id, answer, elapsed_ms)
+        return answer
     except Exception as error:
         elapsed_ms = (time.perf_counter() - sub_started_at) * 1000
         logger.exception("A2A sub-agent call failed: agent_id=%s sub_run_id=%s", agent_id, sub_run_id)
         _mark_agent_run_failed(sub_run_id, str(error), elapsed_ms)
-        return f"子 Agent 调用失败：{error}"
+        error_message = f"子 Agent 调用失败：{error}"
+        write_sub_agent_event({
+            "type": "run_end",
+            "data": {
+                "run_id": sub_run_id,
+                "status": "failed",
+                "message": error_message,
+                "elapsed_ms": elapsed_ms,
+            },
+        })
+        return error_message

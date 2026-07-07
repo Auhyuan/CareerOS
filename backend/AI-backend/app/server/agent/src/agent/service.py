@@ -137,7 +137,7 @@ class AgentService:
         try:
             result = await assembly.agent.ainvoke(
                 {"messages": input_messages},
-                config={"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50},
+                config=self._build_langgraph_config(context),
                 context=context.to_langchain_context(),
             )
         except GraphInterrupt:
@@ -219,6 +219,38 @@ class AgentService:
             answer=answer,
         )
 
+    def _build_langgraph_config(self, context) -> dict[str, Any]:
+        """构建 LangGraph 调用配置，并注入用于流式诊断的 metadata。
+
+        Args:
+            context: 当前 Agent 运行上下文。
+
+        Returns:
+            可传给 agent.ainvoke / agent.astream 的 LangGraph config。
+        """
+        metadata: dict[str, Any] = {
+            "agent_run_id": context.run_id,
+            "agent_thread_id": context.thread_id,
+        }
+        # A2A 子 Agent 会通过 inputs 写入这些诊断字段，用于观察子 Agent 的
+        # 原始流式分片冒泡到主 Agent 时，metadata 是否仍能保留子运行身份。
+        for key in [
+            "_stream_scope",
+            "_sub_run_id",
+            "_sub_agent_id",
+            "_parent_run_id",
+            "_parent_conversation_id",
+        ]:
+            value = context.inputs.get(key) if isinstance(context.inputs, dict) else None
+            if value is not None:
+                metadata[key] = value
+
+        return {
+            "configurable": {"thread_id": context.thread_id},
+            "recursion_limit": 50,
+            "metadata": metadata,
+        }
+
     # ── 流式执行 ────────────────────────────────────────────────
     async def stream(self, request: AgentRunRequest, db: Session | None = None) -> AsyncIterator[dict[str, Any]]:
         """流式运行通用 Agent，并产出可转换为 SSE 的事件。
@@ -260,10 +292,11 @@ class AgentService:
 
             # 第三步：只传入本轮用户消息；跨轮 Agent 记忆由 checkpointer 根据 thread_id 恢复。
             input_messages = [{"role": "user", "content": request.query}]
-            invoke_config = {"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50}
+            invoke_config = self._build_langgraph_config(context)
             answer_parts: list[str] = []
+            suppress_sub_agent_messages = context.inputs.get("_stream_scope") != "sub_agent"
 
-            # 第四步：同时消费 messages 和 updates 流。
+            # 第四步：同时消费 messages、updates 和 custom 流。
             # - messages：模型 token、reasoning、工具调用等前端实时内容。
             # - updates：LangGraph interrupt 只会在 updates 中出现，单独使用 messages 会丢失中断事件。
             # 流式模式下前端已经实时收到了 model_delta，因此接口末尾不再额外发送 final 事件；
@@ -274,17 +307,25 @@ class AgentService:
                 {"messages": input_messages},
                 config=invoke_config,
                 context=context.to_langchain_context(),
-                stream_mode=["messages", "updates"],
+                stream_mode=["messages", "updates", "custom"],
             ):
                 stream_mode, chunk = stream_chunk if isinstance(stream_chunk, tuple) and len(stream_chunk) == 2 else ("messages", stream_chunk)
 
                 if stream_mode == "messages":
-                    for normalized_event in self.stream_parser.normalize_message_stream_chunk(chunk, target_thread_id=context.thread_id):
+                    for normalized_event in self.stream_parser.normalize_message_stream_chunk(
+                        chunk,
+                        suppress_sub_agent=suppress_sub_agent_messages,
+                    ):
                         if normalized_event.get("type") == "model_delta":
                             content = (normalized_event.get("data") or {}).get("content")
                             if isinstance(content, str) and content:
                                 answer_parts.append(content)
                         yield normalized_event
+                    continue
+
+                if stream_mode == "custom":
+                    if isinstance(chunk, dict):
+                        yield chunk
                     continue
 
                 if stream_mode == "updates":

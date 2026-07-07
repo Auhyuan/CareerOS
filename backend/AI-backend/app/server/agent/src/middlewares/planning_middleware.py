@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from typing_extensions import NotRequired
 
 from app.server.agent.src.graph.state import CareerAgentState
@@ -16,8 +16,6 @@ class PlanningState(CareerAgentState, total=False):
     # task_plan 存放本次运行生命周期内的任务计划，不直接落业务库。
     task_plan: NotRequired[dict[str, Any]]
 
-    # planning_feedback 存放用户针对 draft 计划提出的修改意见，供下一轮模型调用参考。
-    planning_feedback: NotRequired[str | None]
 
     # resume_value 是 InterruptMiddleware 写入的一次性恢复事件，由业务中间件消费后清理。
     resume_value: NotRequired[dict[str, Any] | None]
@@ -60,7 +58,7 @@ class PlanningMiddleware(AgentMiddleware[PlanningState]):
             return None
 
         data = resume_value.get("data") if isinstance(resume_value.get("data"), dict) else {}
-        action = str(data.get("action") or "").strip().lower()
+        action = self._normalize_confirmation_action(data.get("action"))
         task_plan = dict(state.get("task_plan") or {})
         if not task_plan:
             # 没有计划可处理时也要清理 resume_value，避免后续模型轮次重复消费。
@@ -68,34 +66,37 @@ class PlanningMiddleware(AgentMiddleware[PlanningState]):
 
         if action == "approve":
             task_plan["status"] = "running"
-            return {
-                "task_plan": task_plan,
-                "planning_feedback": None,
-                "resume_value": None,
-            }
+            return self._build_plan_resume_update(task_plan=task_plan, user_message="用户：确认任务计划")
 
         if action == "revise":
             task_plan["status"] = "draft"
-            feedback = str(data.get("feedback") or "").strip()
-            return {
-                "task_plan": task_plan,
-                "planning_feedback": feedback or "用户要求修改任务计划，但没有提供具体修改意见。",
-                "resume_value": None,
-            }
+            feedback = self._extract_revision_feedback(data)
+            return self._build_plan_resume_update(
+                task_plan=task_plan,
+                user_message=self._build_revision_user_message(feedback),
+            )
 
         if action == "cancel":
             task_plan["status"] = "cancelled"
-            return {
-                "task_plan": task_plan,
-                "planning_feedback": None,
-                "resume_value": None,
-            }
+            return self._build_plan_resume_update(task_plan=task_plan, user_message="用户：取消任务计划")
 
         # 未识别 action 时保留 draft，并把问题反馈给模型，让模型追问或提示用户重新确认。
         task_plan["status"] = "draft"
+        return self._build_plan_resume_update(task_plan=task_plan, user_message="用户：提交了无法识别的任务计划操作")
+
+    def _build_plan_resume_update(self, *, task_plan: dict[str, Any], user_message: str) -> dict[str, Any]:
+        """构建计划确认恢复后的 state 更新。
+
+        Args:
+            task_plan: 已更新整体状态的任务计划。
+            user_message: 需要追加给模型看的用户操作消息。
+
+        Returns:
+            合并回 LangGraph state 的更新内容。
+        """
         return {
             "task_plan": task_plan,
-            "planning_feedback": f"用户确认动作无法识别：{action or 'empty'}。请提示用户重新确认计划。",
+            "messages": [HumanMessage(content=user_message)],
             "resume_value": None,
         }
 
@@ -121,89 +122,95 @@ class PlanningMiddleware(AgentMiddleware[PlanningState]):
         new_system = SystemMessage(content=f"{current_prompt}\n\n{injected}")
         return await handler(request.override(system_message=new_system))
 
+    def _normalize_confirmation_action(self, raw_action: object) -> str:
+        """把前端传入的确认动作归一化为 approve/revise/cancel。
+
+        Args:
+            raw_action: 前端确认卡片传入的 action，可以是英文动作或中文动作。
+
+        Returns:
+            标准动作。无法识别时返回空字符串。
+        """
+        action = str(raw_action or "").strip().lower()
+        if action in {"approve", "confirm", "confirmed", "ok", "yes", "execute", "start", "确认", "同意", "执行"}:
+            return "approve"
+        if action in {"revise", "modify", "change", "edit", "feedback", "update", "修改", "调整", "补充"}:
+            return "revise"
+        if action in {"cancel", "cancelled", "reject", "stop", "abort", "取消", "放弃", "停止"}:
+            return "cancel"
+        return ""
+
+    def _build_revision_user_message(self, feedback: str) -> str:
+        """构建用户修改任务计划时的自然语言操作文本。
+
+        Args:
+            feedback: 用户在确认卡片中提交的修改意见。
+
+        Returns:
+            追加到 messages 中的用户操作文本。
+        """
+        cleaned_feedback = feedback.strip() if isinstance(feedback, str) else ""
+        if cleaned_feedback:
+            return f"用户：修改任务计划。修改意见：{cleaned_feedback}"
+        return "用户：修改任务计划，但没有提供具体修改意见"
+
+    def _extract_revision_feedback(self, data: dict[str, Any]) -> str:
+        """从恢复数据中提取用户对任务计划的修改意见。
+
+        Args:
+            data: plan_confirmation 的 data 字段。
+
+        Returns:
+            用户修改意见文本；没有则返回空字符串。
+        """
+        for key in ("feedback", "suggestion", "message", "text", "value"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
     def _build_planning_prompt(self, state: dict[str, Any]) -> str:
-        """构建追加到 system prompt 末尾的规划模式提示词。
+        """构建追加到 system prompt 末尾的固定规划模式协议。
 
         Args:
             state: 当前 LangGraph state。
 
         Returns:
-            规划模式提示词片段。
+            固定结构的规划模式提示词片段。
         """
         task_plan = state.get("task_plan") if isinstance(state.get("task_plan"), dict) else None
-        feedback = state.get("planning_feedback")
-        status = str((task_plan or {}).get("status") or "")
+        status = str((task_plan or {}).get("status") or "none")
 
-        lines = ["<planning_mode>", "规划模式已启用。"]
+        lines = [
+            "<planning_mode>",
+            "规划模式已启用。以下内容只描述当前任务计划状态和固定规则；用户确认、取消、修改等操作会作为最后一条用户消息出现在 messages 中。",
+            "",
+            "## 当前状态",
+            f"status: {status}",
+        ]
 
-        # 规划模式只保留两类提示词：未确认时创建计划，已确认或已完成时执行/收尾。
-        if status in {"running", "completed"}:
-            self._append_execution_rules(lines)
-        else:
-            self._append_creation_rules(lines, has_plan=task_plan is not None)
-
-        if task_plan:
-            self._append_task_plan_context(lines, task_plan)
-        if isinstance(feedback, str) and feedback.strip():
-            lines.append(f"用户对计划的修改意见：{feedback.strip()}")
-            lines.append("请根据该意见重新调用 set_task_plan，生成新的任务计划草稿。")
+        self._append_task_plan_snapshot(lines, task_plan)
+        self._append_fixed_rules(lines)
 
         lines.append("</planning_mode>")
         return "\n".join(lines)
 
-    def _append_creation_rules(self, lines: list[str], *, has_plan: bool) -> None:
-        """追加创建任务计划阶段的规则。
+    def _append_task_plan_snapshot(self, lines: list[str], task_plan: dict[str, Any] | None) -> None:
+        """追加当前任务计划快照。
 
         Args:
             lines: 正在构建的提示词行列表。
-            has_plan: 当前 state 中是否已经存在任务计划草稿。
+            task_plan: 当前 LangGraph state 中的任务计划；没有计划时为 None。
         """
-        if has_plan:
-            lines.append("当前任务计划尚未进入执行状态，需要等待用户确认或根据用户意见修改。")
-        else:
+        lines.extend(["", "## 当前任务计划"])
+        if not task_plan:
             lines.append("当前还没有任务计划。")
+            return
 
-        lines.extend([
-            "1. 当用户任务需要多任务执行时，必须先调用 set_task_plan 创建任务计划草稿，任务初始状态统一使用 waiting。",
-            "2. set_task_plan 会触发用户确认；用户确认前，不要开始执行计划任务。",
-            "3. 如果用户要求修改计划，继续调用 set_task_plan 重写任务计划草稿。",
-            "4. 不能自行修改整体计划状态，整体状态由系统中间件控制。",
-        ])
-
-    def _append_execution_rules(self, lines: list[str]) -> None:
-        """追加执行已确认任务计划阶段的规则。
-
-        Args:
-            lines: 正在构建的提示词行列表。
-        """
-        lines.extend([
-            "当前任务计划已通过用户确认，请立即开始执行计划。",
-            "请按照以下要求执行计划：",
-            "1. 禁止再次要求用户确认任务计划。",
-            "2. 禁止再次调用 set_task_plan 创建或重写整体计划。",
-            "3. 必须严格按照任务计划任务顺序执行，从第一个 waiting 或 running 任务开始。",
-            "4. 开始执行某个任务前，必须先调用 update_task_step，将该任务状态设置为 running。",
-            "5. 执行任务时可以调用子 Agent 或其他工具，但拿到工具结果后，先调用 update_task_step 记录任务结果，不要先输出完整最终总结。",
-            "6. 某个任务执行完成后，必须调用 update_task_step，将该任务状态设置为 done，并在 result 中写清执行结果。",
-            "7. 如果某个任务执行失败，必须调用 update_task_step，将该任务状态设置为 failed，并在 note 或 result 中写清失败原因。然后直接回复用户：任务执行失败，原因：具体原因。不继续执行剩余任务。",
-            "8. update_task_step 只用于更新单个任务，不允许通过它重写整体计划。",
-            "9. 只有当任务计划状态变为 completed 后，才输出面向用户的最终总结。",
-        ])
-
-    def _append_task_plan_context(self, lines: list[str], task_plan: dict[str, Any]) -> None:
-        """把完整任务计划追加到规划模式提示词。
-
-        Args:
-            lines: 正在构建的提示词行列表。
-            task_plan: 当前 LangGraph state 中的任务计划。
-        """
-        status = str(task_plan.get("status") or "unknown")
         title = str(task_plan.get("title") or "")
         steps = task_plan.get("steps") if isinstance(task_plan.get("steps"), list) else []
-
-        lines.append(f"当前任务计划状态：{status}。")
-        lines.append(f"当前任务计划标题：{title}。")
-        lines.append("当前任务计划任务如下：")
+        lines.append(f"title: {title}")
+        lines.append("steps:")
 
         for index, raw_step in enumerate(steps, start=1):
             if not isinstance(raw_step, dict):
@@ -223,3 +230,26 @@ class PlanningMiddleware(AgentMiddleware[PlanningState]):
             if step_note:
                 lines.append(f"  note={step_note}")
 
+    def _append_fixed_rules(self, lines: list[str]) -> None:
+        """追加固定规划协议规则，不在代码里按状态分支生成不同提示。
+
+        Args:
+            lines: 正在构建的提示词行列表。
+        """
+        lines.extend([
+            "",
+            "## 固定规则",
+            "1. status=none 表示当前没有任务计划；如果用户任务需要多步骤执行，应调用 set_task_plan 创建任务计划草稿。",
+            "2. status=draft 表示任务计划草稿未确认；不能执行任务步骤。",
+            "3. 如果最后一条用户消息表达确认任务计划，说明当前计划已进入 running，可以按步骤执行。",
+            "4. 如果最后一条用户消息表达修改任务计划，必须调用 set_task_plan 按用户意见重写任务计划草稿，不能继续等待旧计划确认，不能执行旧计划。",
+            "5. 如果最后一条用户消息表达取消任务计划，不能执行旧计划；如果用户没有提出新任务，只确认计划已取消。",
+            "6. status=running 表示任务计划已确认；必须按步骤顺序执行，从第一个 waiting 或 running 步骤开始。",
+            "7. 执行某个步骤前，必须调用 update_task_step 将该步骤状态设为 running。",
+            "8. 步骤完成后，必须调用 update_task_step 将该步骤状态设为 done，并在 result 中写清结果。",
+            "9. 步骤失败时，必须调用 update_task_step 将该步骤状态设为 failed，并在 note 或 result 中写清原因，然后回复用户失败原因。",
+            "10. status=completed 表示任务计划已完成；只输出最终总结，不再继续执行任务。",
+            "11. status=cancelled 表示旧任务计划已取消；如果用户提出新的多步骤任务，可以重新调用 set_task_plan 创建新草稿。",
+            "12. set_task_plan 用于创建或重写整体任务计划；只有 status=running 时禁止调用。",
+            "13. update_task_step 只允许在 status=running 时更新单个步骤，禁止用它重写整体计划。",
+        ])
