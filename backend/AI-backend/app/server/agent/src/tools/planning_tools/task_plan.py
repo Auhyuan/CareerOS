@@ -156,7 +156,7 @@ async def set_task_plan(title: str, steps: list[dict[str, Any]], runtime: ToolRu
         runtime: LangGraph 注入的工具运行时，用于读取当前 state 和写入 ToolMessage。
 
     Returns:
-        Command，写入 task_plan、interrupt_payload，并显式跳转回 model 节点。
+        Command，写入 task_plan、interrupt_payload 和工具消息；不主动控制 LangGraph 跳转。
     """
     current_plan = _get_current_task_plan(runtime)
     current_status = str((current_plan or {}).get("status") or "").strip()
@@ -217,13 +217,12 @@ async def update_task_step(
         note: 步骤备注或阻塞原因。
 
     Returns:
-        Command，写入更新后的 task_plan，并显式跳转回 model 节点。
+        Command，写入更新后的 task_plan 和工具消息；不主动控制 LangGraph 跳转。
     """
     current_plan = _get_current_task_plan(runtime)
     if not current_plan:
         return Command(
-            update={"messages": [_build_tool_message(runtime, "当前没有任务计划，无法更新步骤。")]},
-            goto="model",
+            update={"messages": [_build_tool_message(runtime, "当前没有任务计划，无法更新步骤。")]}
         )
 
     current_status = str(current_plan.get("status") or "").strip()
@@ -236,8 +235,7 @@ async def update_task_step(
                         f"当前任务计划状态为 {current_status or 'unknown'}，只有 running 状态才能更新步骤。",
                     )
                 ]
-            },
-            goto="model",
+            }
         )
 
     updated_plan = _merge_step_update(
@@ -256,6 +254,5 @@ async def update_task_step(
         update={
             "task_plan": updated_plan,
             "messages": [_build_tool_message(runtime, tool_message)],
-        },
-        goto="model",
+        }
     )

@@ -22,11 +22,6 @@
       <a-layout-content class="layout-content">
         <slot />
       </a-layout-content>
-
-      <!-- 底部 -->
-      <a-layout-footer class="layout-footer">
-        Agent 管理平台 ©2026 — 基于 AI-backend
-      </a-layout-footer>
     </a-layout>
   </a-layout>
 </template>
@@ -124,12 +119,6 @@ function onMenuClick({ key }: { key: string }) {
   padding: 24px;
   background: #fff;
   border-radius: 8px;
-  min-height: calc(100vh - 70px - 32px);
-}
-.layout-footer {
-  text-align: center;
-  color: #999;
-  font-size: 12px;
-  padding: 16px;
+  min-height: calc(100vh - 32px);
 }
 </style>

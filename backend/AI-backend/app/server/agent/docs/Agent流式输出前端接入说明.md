@@ -341,7 +341,7 @@ Agent 正式回复正文增量输出。
           "step_id": "step_1",
           "title": "学习 Python Web 基础",
           "description": "理解 HTTP、路由、请求响应模型",
-          "status": "todo"
+          "status": "waiting"
         }
       ]
     }

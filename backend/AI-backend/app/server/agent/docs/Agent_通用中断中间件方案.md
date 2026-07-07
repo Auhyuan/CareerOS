@@ -305,7 +305,7 @@ def normalize_resume_value(payload, raw_resume_value):
 
 工具不直接调用 `interrupt()`。
 
-工具只负责写 state，并建议对会触发中断的工具显式返回 `Command(update=..., goto="model")`：
+工具只负责写 state。会触发中断的工具返回 `Command(update=...)` 即可，不建议再设置 `goto="model"`：
 
 ```python
 return Command(
@@ -318,14 +318,13 @@ return Command(
                 "task_plan": task_plan
             }
         }
-    },
-    goto="model"
+    }
 )
 ```
 
-`goto="model"` 会把控制权明确交回模型节点前的中间件链，随后 `InterruptMiddleware.before_model` 自动触发中断。
+`InterruptMiddleware.before_model` 会在下一次模型调用前检查 `interrupt_enabled` 并触发中断。
 
-这样工具不需要关心 LangGraph 的中断恢复细节。
+不使用 `goto="model"` 的原因是：强制跳回模型节点会额外制造模型轮次，容易让任务步骤更新、A2A 调用等链路出现意外的交错执行。工具不需要关心 LangGraph 的中断恢复细节，也不应该主动控制图跳转。
 
 ## 8. 前端 SSE 事件格式
 

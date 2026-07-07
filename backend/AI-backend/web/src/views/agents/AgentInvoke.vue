@@ -100,28 +100,106 @@
                   <div class="reasoning-content">{{ block.content }}</div>
                 </div>
 
-                <div v-else-if="block.type === 'tool'" class="message-tool-call">
-                  <div class="tool-left">
-                    <span class="tool-icon">🔧</span>
-                    <span class="tool-name">{{ block.tool_name }}</span>
-                    <span v-if="block.args && Object.keys(block.args).length" class="tool-args">
-                      {{ formatToolArgs(block.args) }}
+                <div v-else-if="block.type === 'tool'" class="tool-block-wrap">
+                  <div class="message-tool-call">
+                    <div class="tool-left">
+                      <span class="tool-icon">🔧</span>
+                      <span class="tool-name">{{ block.tool_name }}</span>
+                      <span v-if="block.args && Object.keys(block.args).length" class="tool-args">
+                        {{ formatToolArgs(block.args) }}
+                      </span>
+                      <a-tooltip
+                        v-if="block.status === 'done' && block.output !== null && block.output !== undefined"
+                        placement="topLeft"
+                      >
+                        <template #title>
+                          <div class="tool-output-pre">
+                            <MarkdownView :content="formatToolOutput(block.output)" />
+                          </div>
+                        </template>
+                        <span class="tool-output-hint">查看结果</span>
+                      </a-tooltip>
+                    </div>
+                    <span class="tool-status">
+                      <a-spin v-if="block.status === 'running'" size="small" />
+                      <span v-else-if="block.status === 'done'" class="status-done">✓</span>
+                      <span v-else-if="block.status === 'failed'" class="status-failed">✕</span>
                     </span>
-                    <a-tooltip
-                      v-if="block.status === 'done' && block.output !== null && block.output !== undefined"
-                      placement="topLeft"
-                    >
-                      <template #title>
-                        <pre class="tool-output-pre">{{ formatToolOutput(block.output) }}</pre>
-                      </template>
-                      <span class="tool-output-hint">查看结果</span>
-                    </a-tooltip>
                   </div>
-                  <span class="tool-status">
-                    <a-spin v-if="block.status === 'running'" size="small" />
-                    <span v-else-if="block.status === 'done'" class="status-done">✓</span>
-                    <span v-else-if="block.status === 'failed'" class="status-failed">✕</span>
-                  </span>
+
+                  <div
+                    v-for="subRun in block.sub_agent_runs || []"
+                    :key="subRun.sub_run_id"
+                    class="sub-agent-panel"
+                  >
+                    <button class="sub-agent-header" type="button" @click="subRun.collapsed = !subRun.collapsed">
+                      <span class="sub-agent-dot" :class="`sub-agent-dot-${subRun.status}`"></span>
+                      <span class="sub-agent-title">子 Agent：{{ subRun.agent_id }}</span>
+                      <span class="sub-agent-meta">{{ summarizeSubAgentRun(subRun) }}</span>
+                      <span class="sub-agent-status" :class="`sub-agent-status-${subRun.status}`">
+                        {{ formatSubAgentStatus(subRun.status) }}
+                      </span>
+                      <span class="sub-agent-toggle">{{ subRun.collapsed ? '展开' : '收起' }}</span>
+                    </button>
+                    <div v-if="!subRun.collapsed" class="sub-agent-timeline">
+                      <!-- 思考过程：折叠展示，避免抢戏 -->
+                      <details v-if="getSubAgentReasoning(subRun)" class="sub-agent-reasoning">
+                        <summary>💭 思考过程</summary>
+                        <div class="sub-agent-reasoning-body">{{ getSubAgentReasoning(subRun) }}</div>
+                      </details>
+
+                      <!-- 工具调用 + 工具结果：紧凑 timeline -->
+                      <div
+                        v-for="(item, si) in getSubAgentToolPairs(subRun)"
+                        :key="`subtool-${subRun.sub_run_id}-${si}`"
+                        class="sub-agent-tool-row"
+                      >
+                        <span class="sub-agent-tool-icon">🔧</span>
+                        <span class="sub-agent-tool-name">{{ item.toolName }}</span>
+                        <span v-if="item.args" class="sub-agent-tool-args">{{ item.args }}</span>
+                        <span class="sub-agent-tool-status" :class="`sub-agent-tool-status-${item.status}`">
+                          {{ item.status === 'running' ? '执行中' : item.status === 'done' ? '完成' : '失败' }}
+                        </span>
+                      </div>
+
+                      <!-- 子 Agent 最终输出：重点高亮 + Markdown 渲染 -->
+                      <div v-if="getSubAgentOutput(subRun)" class="sub-agent-output">
+                        <div class="sub-agent-output-label">📝 子 Agent 输出</div>
+                        <MarkdownView :content="getSubAgentOutput(subRun)" />
+                      </div>
+
+                      <!-- 任务计划：复用主 Agent 的 plan 样式 -->
+                      <div
+                        v-for="plan in getSubAgentTaskPlans(subRun)"
+                        :key="`subplan-${subRun.sub_run_id}-${plan.__idx}`"
+                        class="message-task-plan sub-agent-plan"
+                      >
+                        <div class="plan-header">
+                          <span class="plan-icon">🗓</span>
+                          <span class="plan-title">{{ plan.title || '任务计划' }}</span>
+                          <span class="plan-status">{{ plan.status || 'draft' }}</span>
+                        </div>
+                        <div v-if="getTaskPlanSteps(plan).length" class="plan-steps">
+                          <div v-for="step in getTaskPlanSteps(plan)" :key="step.step_id || step.title" class="plan-step">
+                            <span class="step-status" :class="getTaskStepStatusClass(step.status)">{{ step.status || 'waiting' }}</span>
+                            <span class="step-title">{{ step.title || step.description || '-' }}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 运行结束摘要 -->
+                      <div
+                        v-for="(subEvent, sei) in getSubAgentMetaEvents(subRun)"
+                        :key="`submeta-${subRun.sub_run_id}-${sei}`"
+                        class="sub-agent-event-meta"
+                        :class="`sub-agent-event-meta-${subEvent.type}`"
+                      >
+                        <span v-if="subEvent.type === 'error'" class="meta-icon">⚠️</span>
+                        <span v-else class="meta-icon">ℹ️</span>
+                        <span>{{ formatSubAgentEvent(subEvent) }}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div v-else-if="block.type === 'task_plan'" class="message-task-plan">
@@ -167,7 +245,9 @@
                   </div>
                 </div>
 
-                <div v-else-if="block.type === 'content'" class="message-content">{{ block.content }}</div>
+                <div v-else-if="block.type === 'content'" class="message-content">
+                  <MarkdownView :content="block.content" />
+                </div>
               </div>
             </template>
             <!-- 用户消息正文 -->
@@ -273,6 +353,7 @@ import {
   type AgentTemplate,
 } from '@/api/agentTemplate'
 import { runAgentStream } from '@/api/agentRun'
+import MarkdownView from '@/components/MarkdownView.vue'
 
 defineOptions({ name: 'AgentInvokeView' })
 
@@ -308,6 +389,22 @@ interface ContentBlock {
   content: string
 }
 
+/** 子 Agent 单条运行事件。 */
+interface SubAgentRunEvent {
+  type: string
+  data: Record<string, any>
+  time: string
+}
+
+/** A2A 工具下挂载的子 Agent 运行过程。 */
+interface SubAgentRunBlock {
+  sub_run_id: string
+  agent_id: string
+  status: 'running' | 'done' | 'failed'
+  collapsed: boolean
+  events: SubAgentRunEvent[]
+}
+
 /** 单次工具调用块。 */
 interface ToolCallBlock {
   type: 'tool'
@@ -318,6 +415,8 @@ interface ToolCallBlock {
   /** 工具执行结果摘要(来自后端 tool_result.output), 仅作展示用。 */
   output: unknown
   status: 'running' | 'done' | 'failed'
+  /** A2A 工具调用下的子 Agent 执行过程。 */
+  sub_agent_runs?: SubAgentRunBlock[]
 }
 
 /** 任务计划展示块。 */
@@ -520,6 +619,158 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`
 }
 
+/** 格式化子 Agent 运行状态。 */
+function formatSubAgentStatus(status: SubAgentRunBlock['status']): string {
+  if (status === 'running') return '运行中'
+  if (status === 'done') return '完成'
+  return '失败'
+}
+
+/** 汇总子 Agent 运行过程，用于折叠头部展示。 */
+function summarizeSubAgentRun(subRun: SubAgentRunBlock): string {
+  const toolCount = subRun.events.filter((event) => event.type === 'tool_call').length
+  const outputCount = subRun.events.filter((event) => event.type === 'model_delta').length
+  const parts = [`${subRun.events.length} 个事件`]
+  if (toolCount) parts.push(`${toolCount} 次工具`)
+  if (outputCount) parts.push(`${outputCount} 段输出`)
+  return parts.join(' · ')
+}
+
+/** 把子 Agent 原始事件格式化成单行内容，避免小面板过度占用空间。 */
+function formatSubAgentEvent(event: SubAgentRunEvent): string {
+  const data = event.data || {}
+  if (event.type === 'reasoning_delta' || event.type === 'model_delta') {
+    return String(data.content || '').trim()
+  }
+  if (event.type === 'tool_call') {
+    const toolName = String(data.tool_name || 'tool')
+    return data.args && typeof data.args === 'object' ? `${toolName} ${formatToolArgs(data.args)}` : toolName
+  }
+  if (event.type === 'tool_result') {
+    const toolName = String(data.tool_name || 'tool')
+    return `${toolName} 完成`
+  }
+  if (event.type === 'run_end') {
+    return typeof data.elapsed_ms === 'number' ? `耗时 ${formatDuration(data.elapsed_ms)}` : '子 Agent 运行完成'
+  }
+  if (event.type === 'error') {
+    return String(data.message || '子 Agent 运行失败')
+  }
+  return formatToolOutput(data)
+}
+
+/**
+ * 把子 Agent 的流式事件按类型归类：
+ * - reasoning: 累加所有 reasoning_delta
+ * - toolPairs: 配对 tool_call / tool_result（按 tool_call_id 或下标配对）
+ * - output: 累加所有 model_delta
+ * - plans: 抽离 task_plan 事件
+ * - meta: 保留 run_end / error 等状态事件
+ */
+interface SubAgentGrouped {
+  reasoning: string
+  toolPairs: Array<{ toolName: string; args: string; status: 'running' | 'done' | 'failed' }>
+  output: string
+  plans: Array<Record<string, any> & { __idx: number }>
+  meta: SubAgentRunEvent[]
+}
+
+/** 把子 Agent 事件数组归类为 timeline 所需的分组。 */
+function groupSubAgentEvents(subRun: SubAgentRunBlock): SubAgentGrouped {
+  const reasoningParts: string[] = []
+  const outputParts: string[] = []
+  const toolPairs: SubAgentGrouped['toolPairs'] = []
+  const plans: SubAgentGrouped['plans'] = []
+  const meta: SubAgentRunEvent[] = []
+  // 用 id 配对 tool_call / tool_result；没有 id 时按下标相邻配对。
+  const toolIndexById = new Map<string, number>()
+  let fallbackIndex = 0
+
+  for (const event of subRun.events) {
+    const data = (event.data || {}) as Record<string, any>
+    if (event.type === 'reasoning_delta') {
+      const content = String(data.content || '')
+      if (content) reasoningParts.push(content)
+      continue
+    }
+    if (event.type === 'model_delta') {
+      const content = String(data.content || '')
+      if (content) outputParts.push(content)
+      continue
+    }
+    if (event.type === 'tool_call') {
+      const toolName = String(data.tool_name || 'tool')
+      const args = data.args && typeof data.args === 'object' ? formatToolArgs(data.args) : ''
+      const callId = typeof data.id === 'string' ? data.id : ''
+      const pair = { toolName, args, status: 'running' as const }
+      if (callId) toolIndexById.set(callId, toolPairs.length)
+      else toolIndexById.set(`__fallback_${fallbackIndex++}`, toolPairs.length)
+      toolPairs.push(pair)
+      continue
+    }
+    if (event.type === 'tool_result') {
+      const callId = typeof data.tool_call_id === 'string' ? data.tool_call_id : ''
+      const pairIndex = callId ? toolIndexById.get(callId) : undefined
+      if (typeof pairIndex === 'number' && toolPairs[pairIndex]) {
+        toolPairs[pairIndex] = { ...toolPairs[pairIndex], status: data.status || 'done' }
+      } else {
+        // 没有配对的 tool_call，作为只读结果展示
+        const toolName = String(data.tool_name || 'tool')
+        toolPairs.push({ toolName, args: '', status: data.status || 'done' })
+      }
+      continue
+    }
+    if (event.type === 'task_plan') {
+      const plan = data.task_plan
+      if (plan && typeof plan === 'object') {
+        plans.push({ ...(plan as Record<string, any>), __idx: plans.length })
+      }
+      continue
+    }
+    // run_end / error / run_start 等元信息
+    if (event.type === 'run_end' || event.type === 'error' || event.type === 'run_start') {
+      meta.push(event)
+    }
+  }
+  return {
+    reasoning: reasoningParts.join(''),
+    output: outputParts.join(''),
+    toolPairs,
+    plans,
+    meta,
+  }
+}
+
+/** 汇总子 Agent 思考过程文本。 */
+function getSubAgentReasoning(subRun: SubAgentRunBlock): string {
+  return groupSubAgentEvents(subRun).reasoning
+}
+
+/** 汇总子 Agent 最终输出文本。 */
+function getSubAgentOutput(subRun: SubAgentRunBlock): string {
+  return groupSubAgentEvents(subRun).output
+}
+
+/** 汇总子 Agent 工具调用 timeline。 */
+function getSubAgentToolPairs(subRun: SubAgentRunBlock): SubAgentGrouped['toolPairs'] {
+  return groupSubAgentEvents(subRun).toolPairs
+}
+
+/** 汇总子 Agent 任务计划。 */
+function getSubAgentTaskPlans(subRun: SubAgentRunBlock): SubAgentGrouped['plans'] {
+  return groupSubAgentEvents(subRun).plans
+}
+
+/** 汇总子 Agent 元信息（运行结束 / 错误）。 */
+function getSubAgentMetaEvents(subRun: SubAgentRunBlock): SubAgentRunEvent[] {
+  return groupSubAgentEvents(subRun).meta
+}
+
+/** 判断工具块是否是 A2A 调用。 */
+function isA2AToolBlock(block: ToolCallBlock): boolean {
+  return block.tool_name === 'a2a_call'
+}
+
 /** 更新指定 assistant 消息。 */
 function updateAssistantMessage(index: number, updater: (message: MessageItem) => MessageItem) {
   const current = messages.value[index]
@@ -590,6 +841,7 @@ function appendToolCallBlock(index: number, data: Record<string, any>) {
     call_id: callId,
     output: null,
     status: 'running',
+    sub_agent_runs: [],
   }
 
   updateAssistantMessage(index, (message) => {
@@ -619,6 +871,92 @@ function appendToolCallBlock(index: number, data: Record<string, any>) {
       tool_calls: [...message.tool_calls, toolBlock],
       blocks: [...message.blocks, toolBlock],
     }
+  })
+}
+
+/** 查找子 Agent 事件应该挂载到哪个 A2A 工具块。 */
+function findA2AToolBlockIndex(blocks: StreamBlock[], parentToolCallId: string | null): number {
+  if (parentToolCallId) {
+    const matchedIndex = blocks.findIndex(
+      (block) => block.type === 'tool' && block.call_id === parentToolCallId,
+    )
+    if (matchedIndex >= 0) return matchedIndex
+  }
+
+  // 兜底：如果后端没有传 parent_tool_call_id，就挂到最近一个 a2a_call 工具块下面。
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index]
+    if (block.type === 'tool' && isA2AToolBlock(block)) return index
+  }
+  return -1
+}
+
+/** 根据子 Agent 事件类型推导子运行状态。 */
+function getNextSubAgentStatus(eventType: string, currentStatus: SubAgentRunBlock['status']): SubAgentRunBlock['status'] {
+  if (eventType === 'run_end') return 'done'
+  if (eventType === 'error') return 'failed'
+  return currentStatus
+}
+
+/** 把 sub_agent_event 挂到对应的 A2A 工具卡片下面。 */
+function appendSubAgentEventBlock(index: number, data: Record<string, any>) {
+  const rawEvent = data.event
+  if (!rawEvent || typeof rawEvent !== 'object') return
+
+  const subRunId = String(data.sub_run_id || '')
+  if (!subRunId) return
+
+  const agentId = String(data.agent_id || 'sub-agent')
+  const parentToolCallId = typeof data.parent_tool_call_id === 'string' ? data.parent_tool_call_id : null
+  const eventType = String(rawEvent.type || 'event')
+  const eventData = ((rawEvent.data || {}) as Record<string, any>)
+  const subEvent: SubAgentRunEvent = {
+    type: eventType,
+    data: eventData,
+    time: now(),
+  }
+
+  updateAssistantMessage(index, (message) => {
+    const blocks = message.blocks.map((block) => ({ ...block })) as StreamBlock[]
+    const toolBlockIndex = findA2AToolBlockIndex(blocks, parentToolCallId)
+    if (toolBlockIndex < 0) return message
+
+    const toolBlock = blocks[toolBlockIndex]
+    if (toolBlock.type !== 'tool') return message
+
+    const currentRuns = [...(toolBlock.sub_agent_runs || [])]
+    const runIndex = currentRuns.findIndex((run) => run.sub_run_id === subRunId)
+    if (runIndex >= 0) {
+      const currentRun = currentRuns[runIndex]
+      const nextStatus = getNextSubAgentStatus(eventType, currentRun.status)
+      currentRuns[runIndex] = {
+        ...currentRun,
+        status: nextStatus,
+        collapsed: nextStatus === 'running' ? currentRun.collapsed : true,
+        events: [...currentRun.events, subEvent],
+      }
+    } else {
+      currentRuns.push({
+        sub_run_id: subRunId,
+        agent_id: agentId,
+        status: getNextSubAgentStatus(eventType, 'running'),
+        collapsed: false,
+        events: [subEvent],
+      })
+    }
+
+    const nextToolBlock: ToolCallBlock = {
+      ...toolBlock,
+      sub_agent_runs: currentRuns,
+    }
+    blocks[toolBlockIndex] = nextToolBlock
+
+    const tool_calls = message.tool_calls.map((call) => {
+      if (nextToolBlock.call_id && call.call_id === nextToolBlock.call_id) return nextToolBlock
+      return call
+    })
+
+    return { ...message, blocks, tool_calls }
   })
 }
 
@@ -813,6 +1151,13 @@ function handleAgentStreamEvent(index: number, event: Record<string, any>) {
 
   // 生命周期：Agent 装配完成，普通聊天页保持简洁，不直接展示。
   if (event.type === 'agent_assembled') return
+
+  // 子 Agent 事件：挂到对应 a2a_call 工具卡片下方，避免和主 Agent 输出混在一起。
+  if (event.type === 'sub_agent_event') {
+    appendSubAgentEventBlock(index, data)
+    scrollToBottom()
+    return
+  }
 
   // 工具调用：模型发起一次新工具调用，按事件顺序加入时间线。
   if (event.type === 'tool_call') {
@@ -1353,6 +1698,245 @@ onMounted(async () => {
   white-space: pre-wrap;
   word-break: break-all;
   font-family: 'Fira Code', 'Cascadia Code', Menlo, Consolas, monospace;
+}
+
+
+.tool-block-wrap {
+  margin-bottom: 8px;
+}
+.sub-agent-panel {
+  margin: 4px 0 10px 22px;
+  border: 1px solid #d3adf7;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #fcfaff 0%, #f9f0ff 100%);
+  overflow: hidden;
+}
+.sub-agent-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  color: #391085;
+}
+.sub-agent-header:hover {
+  background: rgba(114, 46, 209, 0.06);
+}
+.sub-agent-title {
+  font-weight: 600;
+  color: #531dab;
+}
+.sub-agent-meta {
+  color: #8c8c8c;
+  flex: 1;
+  min-width: 0;
+}
+.sub-agent-status {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.sub-agent-status-running {
+  color: #0958d9;
+  background: #e6f4ff;
+}
+.sub-agent-status-done {
+  color: #389e0d;
+  background: #f6ffed;
+}
+.sub-agent-status-failed {
+  color: #cf1322;
+  background: #fff1f0;
+}
+.sub-agent-toggle {
+  color: #722ed1;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.sub-agent-events {
+  padding: 4px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.sub-agent-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.sub-event-type {
+  flex-shrink: 0;
+  min-width: 56px;
+  color: #722ed1;
+  font-weight: 600;
+}
+.sub-event-content {
+  flex: 1;
+  color: #434343;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sub-agent-event-reasoning_delta .sub-event-content {
+  color: #595959;
+}
+.sub-agent-event-model_delta .sub-event-content {
+  color: #1f1f1f;
+}
+.sub-agent-event-tool_call .sub-event-content {
+  color: #0958d9;
+}
+.sub-agent-event-error .sub-event-content {
+  color: #cf1322;
+}
+
+/* 子 Agent 嵌套时间线：把散落的小字事件重组成"思考 → 工具 → 输出"的连续流 */
+.sub-agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #d9d9d9;
+}
+.sub-agent-dot-running {
+  background: #1677ff;
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.18);
+  animation: sub-agent-pulse 1.4s ease-in-out infinite;
+}
+.sub-agent-dot-done { background: #52c41a; }
+.sub-agent-dot-failed { background: #ff4d4f; }
+@keyframes sub-agent-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.18); }
+  50%      { box-shadow: 0 0 0 6px rgba(22, 119, 255, 0); }
+}
+
+.sub-agent-timeline {
+  padding: 6px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px dashed #d3adf7;
+  margin-top: 2px;
+}
+
+.sub-agent-reasoning {
+  font-size: 12px;
+  color: #595959;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.sub-agent-reasoning summary {
+  cursor: pointer;
+  color: #722ed1;
+  font-weight: 500;
+  user-select: none;
+}
+.sub-agent-reasoning-body {
+  margin-top: 6px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #595959;
+}
+
+.sub-agent-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: #f0f5ff;
+  border: 1px solid #d6e4ff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sub-agent-tool-icon { flex-shrink: 0; }
+.sub-agent-tool-name {
+  font-weight: 600;
+  color: #1d39c4;
+}
+.sub-agent-tool-args {
+  flex: 1;
+  color: #595959;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.sub-agent-tool-status {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+.sub-agent-tool-status-running {
+  color: #0958d9;
+  background: #e6f4ff;
+}
+.sub-agent-tool-status-done {
+  color: #389e0d;
+  background: #f6ffed;
+}
+.sub-agent-tool-status-failed {
+  color: #cf1322;
+  background: #fff1f0;
+}
+
+.sub-agent-output {
+  margin-top: 2px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #d3adf7;
+  border-left: 3px solid #722ed1;
+}
+.sub-agent-output-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #722ed1;
+  margin-bottom: 6px;
+  letter-spacing: 0.4px;
+}
+/* 子 Agent 输出在嵌套卡片里需要比外部更小的字号 */
+.sub-agent-output :deep(.markdown-view) {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.sub-agent-plan {
+  margin: 0;
+}
+
+.sub-agent-event-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #8c8c8c;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 4px;
+}
+.sub-agent-event-meta .meta-icon {
+  flex-shrink: 0;
+}
+.sub-agent-event-meta-error {
+  color: #cf1322;
+  background: #fff1f0;
 }
 
 

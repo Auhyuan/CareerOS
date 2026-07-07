@@ -171,8 +171,8 @@ Agent 不能绕过用户确认，不能自己把任务计划整体状态改成 `
 3. 初始化步骤状态为 `waiting`。
 4. 设置 `interrupt_enabled = true`。
 5. 设置 `interrupt_payload.type = plan_confirmation`。
-6. 返回 `Command(update=..., goto="model")`，显式把控制权交回模型节点前的中间件链。
-7. 返回“任务计划已创建，等待用户确认”。
+6. 返回 `Command(update=...)` 写入状态和工具消息，不再强制 `goto="model"`。
+7. 后续是否进入模型节点由 LangGraph 正常工具链路决定，`InterruptMiddleware` 会在下一次模型调用前触发中断。
 
 示例工具返回：
 
@@ -187,13 +187,14 @@ return Command(
                 "task_plan": task_plan
             }
         },
-        "messages": [ToolMessage(content="任务计划草稿已生成，已暂停等待用户确认。")]
-    },
-    goto="model"
+        "messages": [ToolMessage(content="任务计划已创建成功，具体状态和下一步动作请以 <planning_mode> 中的系统提示为准。")]
+    }
 )
 ```
 
-`goto="model"` 的作用是避免触发中断的工具执行后继续走不确定的工具链路，而是明确回到模型节点；随后 `InterruptMiddleware.before_model` 会先于模型调用触发 `interrupt()`。
+注意：任务计划工具不再设置 `goto="model"`。
+
+原因是 `goto="model"` 会额外制造一次模型轮次，在 A2A、任务步骤更新等场景下容易让主 Agent 提前继续推理，造成“工具尚未完全结束但模型已经进入下一步”的错觉或并发问题。现在工具只负责写入 state 和 ToolMessage，控制流交给 LangGraph 默认工具链路。
 
 ### 7.2 update_task_step
 

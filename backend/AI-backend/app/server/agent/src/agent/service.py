@@ -232,7 +232,7 @@ class AgentService:
             "agent_run_id": context.run_id,
             "agent_thread_id": context.thread_id,
         }
-        # A2A 子 Agent 会通过 inputs 写入这些诊断字段，用于观察子 Agent 的
+        # A2A 子 Agent 会通过 inputs 写入这些诊断字段，用于观察子 Agent 的运行情况。
         # 原始流式分片冒泡到主 Agent 时，metadata 是否仍能保留子运行身份。
         for key in [
             "_stream_scope",
