@@ -63,13 +63,13 @@ Agent 平台需要支持外部能力以 MCP 工具的形式热插拔接入。平
 
 ## 6. Agent运行时加载流程
 
-1. Agent 模板或运行请求中传入工具编码列表。
-2. `AgentToolService` 先匹配内置工具。
-3. 不属于内置工具的编码视为 MCP 工具编码。
-4. `MCPService.load_langchain_tools` 从 `agent_mcp_tools` 查询已启用工具。
-5. 按 `base_url + transport + auth_config` 临时分组创建 MCP 客户端。
-6. 通过 `langchain-mcp-adapters` 获取 LangChain Tool。
-7. 只筛选本次请求指定的工具，并传入 `create_agent`。
+1. Agent 模板或运行请求中的 `tools` 只允许传入 MCP 工具编码。
+2. `AgentToolService` 会拒绝 `a2a_call`、`set_task_plan`、`update_task_step` 等系统内置工具出现在 `tools` 中。
+3. `MCPService.load_langchain_tools` 从 `agent_mcp_tools` 查询已启用工具。
+4. 按 `base_url + transport + auth_config` 临时分组创建 MCP 客户端。
+5. 通过 `langchain-mcp-adapters` 获取 LangChain Tool。
+6. 只筛选本次请求指定的 MCP 工具，并传入 `create_agent`。
+7. A2A、规划等内置能力工具不走 `tools` 字段，而是由 `a2a.sub_agent_list`、`optional_features.planning_enabled` 等能力参数自动挂载。
 
 ## 7. 为什么不用服务表
 

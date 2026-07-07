@@ -16,7 +16,7 @@ logger = logging.getLogger("ai_backend.agent.tools")
 
 
 class AgentToolService:
-    """Agent 工具服务，负责内置工具、MCP 工具和工具调试调用。"""
+    """Agent 工具服务，负责系统内置能力工具、MCP 外接工具和工具调试调用。"""
 
     def __init__(self, registry: AgentToolRegistry | None = None, mcp_service: MCPService | None = None):
         """初始化 Agent 工具服务。
@@ -84,9 +84,11 @@ class AgentToolService:
         return AgentToolInfo(
             name=definition.name,
             description=definition.description,
-            group="planning" if is_planning_tool else "regular",
-            invokable=not is_planning_tool,
-            invoke_note="规划工具依赖 LangGraph 运行态，只能通过 /agent/run 的 planning_enabled 自动启用。" if is_planning_tool else None,
+            group="planning" if is_planning_tool else "internal",
+            invokable=False,
+            template_selectable=False,
+            activation_mode="feature",
+            invoke_note="规划工具是系统内置能力，只能通过 planning_enabled 自动启用，不能配置到模板 tools。" if is_planning_tool else "内置工具由系统能力开关自动挂载，不能配置到模板 tools。",
             args_schema=self._build_args_schema(definition.callable_ref),
         )
 
@@ -101,16 +103,30 @@ class AgentToolService:
             description=a2a_call.description,
             group="a2a",
             invokable=False,
+            template_selectable=False,
+            activation_mode="feature",
             invoke_note=(
-                "a2a_call 会在 /agent/run 检测到 a2a.sub_agent_list 后动态注入，"
-                "不能在工具测试页直接调用。"
+                "a2a_call 是系统内置能力工具，会在 a2a.sub_agent_list 非空时自动挂载，"
+                "不能配置到模板 tools，也不能在工具测试页直接调用。"
             ),
             args_schema=self._build_args_schema(a2a_call),
         )
 
     def list_tools(self) -> list[str]:
-        """查询 AI-backend 内置常规工具名称。"""
+        """查询系统内置能力工具名称。
+
+        Returns:
+            内置能力工具名称列表。它们仅用于能力说明，不能配置到模板 tools。
+        """
         return self.registry.list_tools()
+
+    def get_internal_tool_names(self) -> set[str]:
+        """获取不能配置到模板 tools 的系统内置工具名称。
+
+        Returns:
+            内置工具名称集合，包括规划工具和 A2A 动态工具。
+        """
+        return set(self.registry.list_tools()) | {a2a_call.name}
 
     def list_tool_details(self, include_dynamic: bool = True) -> list[AgentToolInfo]:
         """查询前端可展示的内置工具详情。
@@ -127,40 +143,42 @@ class AgentToolService:
         return items
 
     async def get_tools(self, tool_names: list[str] | None = None, db: Session | None = None) -> list[Any]:
-        """解析本次 Agent 运行可用的工具列表。
+        """解析模板配置中的 MCP 外接工具。
 
         Args:
-            tool_names: 工具白名单。None 返回全部内置常规工具；空列表表示不加载常规工具。
-            db: 数据库会话；当工具列表中包含 MCP 工具时必须传入。
+            tool_names: 模板 tools 白名单。该字段只允许填写 MCP 工具编码；None 或空列表表示不加载外接工具。
+            db: 数据库会话；加载 MCP 工具时必须传入或临时打开只读会话。
 
         Returns:
-            可传给 LangChain create_agent 的工具对象列表。
+            可传给 LangChain create_agent 的 MCP 工具对象列表。
+
+        Raises:
+            RuntimeError: tools 中包含系统内置工具时抛出，避免模板绕过能力开关直接挂载内置工具。
         """
-        if tool_names is None:
-            return self.registry.get_all_tools()
         if not tool_names:
             return []
 
-        builtin_tool_names: list[str] = []
-        mcp_tool_codes: list[str] = []
-        for name in tool_names:
-            if self.registry.has_tool(name):
-                builtin_tool_names.append(name)
-            else:
-                mcp_tool_codes.append(name)
+        # 模板 tools 只表示外接 MCP 工具。规划、A2A 等内置工具必须通过功能参数自动挂载。
+        cleaned_names = [str(name or "").strip() for name in tool_names if str(name or "").strip()]
+        internal_names = self.get_internal_tool_names()
+        invalid_internal_names = [name for name in cleaned_names if name in internal_names]
+        if invalid_internal_names:
+            raise RuntimeError(
+                "模板 tools 只允许配置 MCP 外接工具，内置工具请通过能力参数启用: "
+                + ", ".join(invalid_internal_names)
+            )
 
-        tools = [self.registry.get_tool(name) for name in builtin_tool_names]
-        if mcp_tool_codes:
-            if db is not None:
-                tools.extend(await self.mcp_service.load_langchain_tools(db, mcp_tool_codes))
-            else:
-                # A2A 子 Agent 等内部调用场景可能不传 db，此时短暂打开一个
-                # 只读会话，仅用于加载 MCP 工具配置，不写业务会话记录。
-                from app.common.db.postgres_db import get_db_session
+        # 去重但保留用户配置顺序，便于日志排查。
+        mcp_tool_codes = list(dict.fromkeys(cleaned_names))
+        if db is not None:
+            return await self.mcp_service.load_langchain_tools(db, mcp_tool_codes)
 
-                with get_db_session() as inner_db:
-                    tools.extend(await self.mcp_service.load_langchain_tools(inner_db, mcp_tool_codes))
-        return tools
+        # A2A 子 Agent 等内部调用场景可能不传 db，此时短暂打开一个
+        # 只读会话，仅用于加载 MCP 工具配置，不写业务会话记录。
+        from app.common.db.postgres_db import get_db_session
+
+        with get_db_session() as inner_db:
+            return await self.mcp_service.load_langchain_tools(inner_db, mcp_tool_codes)
 
     async def invoke_tool(self, tool_name: str, args: dict[str, Any], db: Session | None = None) -> Any:
         """从工具管理页测试调用一个工具。

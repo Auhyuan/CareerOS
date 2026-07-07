@@ -352,12 +352,12 @@ Templates 层负责 Agent 模板管理。
 - Agent 名称
 - Agent 描述
 - 默认模型配置
-- 默认工具列表
+- 默认 MCP 外接工具列表
 - 默认 prompt
 - 默认 optional features
 - 业务自定义配置
 
-模板配置使用 JSONB 存储，并通过 `AgentTemplateConfig` 校验 `system_prompt`、`response_format`、`tools`、`optional_features` 和 `runtime_options`；同时允许额外字段，便于后续扩展。
+模板配置使用 JSONB 存储，并通过 `AgentTemplateConfig` 校验 `system_prompt`、`tools`、`optional_features` 和 `runtime_options`。其中 `tools` 只允许保存 MCP 外接工具编码；规划、A2A 等内置工具通过能力参数自动挂载。同时允许额外字段，便于后续扩展。
 
 模板服务只负责配置管理。调用方如果要基于模板运行，应先通过模板接口查询配置，再把配置展开后调用 `/agent/run`。
 

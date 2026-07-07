@@ -1,9 +1,9 @@
 <!--
   工具管理页
-  - 展示内置工具、MCP 外部工具和动态工具详情
+  - 只展示 MCP 外接工具，内置能力工具不在工具管理页展示
   - 支持从 MCP 地址同步工具，也支持手动新增 MCP 工具
   - 工具测试统一使用 JSON 参数，Schema 只作为参考
-  - 调试调用 POST /agent/tools/invoke，后端会自动分发到内置工具或 MCP 工具
+  - 调试调用 POST /agent/tools/invoke，后端会分发到对应 MCP 工具
 -->
 <template>
   <div>
@@ -168,10 +168,10 @@
 <script setup lang="ts">
 /**
  * 工具管理页逻辑。
- * - 从 /agent/capabilities 读取内置工具、MCP 外部工具和动态工具详情。
+ * - 从 /agent/capabilities 读取 MCP 外接工具详情。
  * - 支持同步 MCP 服务工具和手动新增 MCP 工具。
  * - 使用 JSON 参数测试工具，避免为复杂 MCP Schema 维护沉重的动态表单。
- * - 通过 /agent/tools/invoke 调试调用工具，后端自动分发到内置工具或 MCP 工具。
+ * - 通过 /agent/tools/invoke 调试调用 MCP 工具。
  */
 import { onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
@@ -220,16 +220,25 @@ async function load() {
   loading.value = true
   try {
     const cap = await getCapabilities()
-    tools.value = cap.tools?.length
-      ? cap.tools
+    // 工具管理页只管理 MCP 外接工具。
+    // A2A、规划等内置能力工具由系统参数自动挂载，不展示在这里，避免用户误配置到模板 tools。
+    const capabilityTools = cap.tools || []
+    tools.value = capabilityTools.length
+      ? capabilityTools.filter((tool) => tool.group === 'mcp' && tool.template_selectable !== false)
       : (cap.registered_tools || []).map((name) => ({
           name,
           description: '',
-          group: 'regular',
+          group: 'mcp',
           invokable: true,
+          template_selectable: true,
+          activation_mode: 'template',
           invoke_note: null,
           args_schema: {},
         }))
+
+    if (selectedTool.value && !tools.value.some((tool) => tool.name === selectedTool.value?.name)) {
+      selectedTool.value = null
+    }
     if (!selectedTool.value && tools.value.length) selectTool(tools.value[0])
   } finally {
     loading.value = false
@@ -386,7 +395,6 @@ function buildExampleArgs(schema: Record<string, any>) {
 
 /** 根据工具分组返回标签颜色。 */
 function toolGroupColor(group: string) {
-  if (group === 'a2a') return 'cyan'
   if (group === 'mcp') return 'purple'
   return 'blue'
 }

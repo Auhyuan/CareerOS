@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.server.agent.src.schemas.request import AgentA2AConfig, AgentOptionalFeatures, ModelRuntimeOptions
 
@@ -10,7 +10,7 @@ class AgentTemplateConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     system_prompt: str | None = Field(default=None, description="Agent 默认系统提示词")
-    tools: list[str] = Field(default_factory=list, description="Agent 默认可用工具名称")
+    tools: list[str] = Field(default_factory=list, description="Agent 默认可用 MCP 外接工具编码；内置工具不能配置在这里")
     optional_features: AgentOptionalFeatures = Field(
         default_factory=AgentOptionalFeatures,
         description="Agent 默认可选能力配置",
@@ -24,6 +24,27 @@ class AgentTemplateConfig(BaseModel):
         default_factory=ModelRuntimeOptions,
         description="Agent 默认模型运行参数",
     )
+
+    @field_validator("tools")
+    @classmethod
+    def validate_external_tools(cls, value: list[str]) -> list[str]:
+        """校验模板 tools 只能配置 MCP 外接工具。
+
+        Args:
+            value: 前端传入的工具编码列表。
+
+        Returns:
+            清理空白并去重后的 MCP 工具编码列表。
+
+        Raises:
+            ValueError: 发现系统内置工具时抛出。
+        """
+        internal_tool_names = {"a2a_call", "set_task_plan", "update_task_step"}
+        cleaned_tools = [str(item or "").strip() for item in value if str(item or "").strip()]
+        invalid_tools = [name for name in cleaned_tools if name in internal_tool_names]
+        if invalid_tools:
+            raise ValueError("模板 tools 只允许配置 MCP 外接工具，内置工具请通过能力参数启用: " + ", ".join(invalid_tools))
+        return list(dict.fromkeys(cleaned_tools))
 
 
 

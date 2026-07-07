@@ -82,7 +82,7 @@ def get_agent_capabilities(db: Session = Depends(get_postgres_engine)):
                 "graph_state_schema",
                 "job_skill_http_tools",
             ],
-            registered_tools=[tool.name for tool in all_tools if tool.group != "a2a"],
+            registered_tools=[tool.name for tool in all_tools if tool.template_selectable],
             tools=all_tools,
         )
     )
@@ -100,6 +100,8 @@ def _list_mcp_tool_details(db: Session) -> list[AgentToolInfo]:
             description=item.description or "",
             group="mcp",
             invokable=True,
+            template_selectable=True,
+            activation_mode="template",
             invoke_note=f"MCP 外部工具，真实工具名：{item.name}",
             args_schema=_normalize_tool_schema(item.input_schema),
         )

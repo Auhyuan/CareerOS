@@ -50,7 +50,7 @@
 - `response_format` 接收可选 JSON Schema，非空时启用 LangChain 结构化输出。
 - `inputs` 是业务变量，供 prompt、工具、中间件读取。
 - `files` 是附件上下文。
-- `tools` 是本次允许加载的工具白名单。
+- `tools` 是本次允许加载的 MCP 外接工具编码白名单；A2A、规划等内置工具不允许写在这里。
 - `optional_features` 是本次运行的能力开关。
 - `runtime_options` 是模型运行参数。
 - `runtime_options.model` 是 Agent 根目录 `model_gateway.yaml` 中的模型别名，空值使用网关默认聊天模型。
@@ -268,17 +268,16 @@ system_prompt = self.prompt_service.render_system_prompt(
 tools = self.tool_service.get_tools(build_config.tool_names)
 ```
 
-`request.tools` 是本次允许使用的工具白名单。
+`request.tools` 只表示本次允许使用的 MCP 外接工具编码。
 
-例如岗位画像 Agent 后续可能加载：
+例如岗位画像 Agent 可以配置：
 
 ```text
-query_job_postings
-load_job_descriptions
-save_job_market_profile
+job.search_job_skills
+job.create_job_skills
 ```
 
-工具本身应该保持业务能力函数属性，不要直接承担 Agent 编排逻辑。
+A2A 工具、任务规划工具等属于系统内置能力工具，不允许配置在 `tools` 中。它们分别由 `a2a.sub_agent_list`、`optional_features.planning_enabled` 等能力参数自动挂载。工具本身应该保持业务能力函数属性，不要直接承担 Agent 编排逻辑。
 
 ## Context Schema
 

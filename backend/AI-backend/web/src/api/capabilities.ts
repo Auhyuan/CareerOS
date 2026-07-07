@@ -10,6 +10,10 @@ export interface AgentToolInfo {
   description: string
   group: string
   invokable: boolean
+  /** 是否允许在 Agent 模板 config.tools 中选择。 */
+  template_selectable?: boolean
+  /** 工具启用方式：template 表示模板选择，feature 表示能力开关自动挂载。 */
+  activation_mode?: string
   invoke_note?: string | null
   args_schema: Record<string, any>
 }

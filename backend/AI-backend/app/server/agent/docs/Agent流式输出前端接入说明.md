@@ -136,7 +136,7 @@ POST /agent/messages
 | `stream` | boolean | 否 | 是否 SSE 流式返回，默认建议传 `true`。 |
 | `inputs` | object | 否 | 业务变量。新任务时会进入 Agent runtime context。 |
 | `files` | array | 否 | 附件上下文预留字段。 |
-| `tools` | array | 否 | 新任务运行时允许加载的工具名称。多数场景交给模板控制。 |
+| `tools` | array | 否 | 新任务运行时允许加载的 MCP 外接工具编码。内置工具不能放在这里，多数场景交给模板控制。 |
 | `optional_features` | object | 否 | 可选能力，例如 `planning_enabled`。 |
 | `a2a` | object | 否 | A2A 子 Agent 配置。多数场景交给模板控制。 |
 | `runtime_options` | object | 否 | 模型运行参数。多数场景交给模板控制。 |
