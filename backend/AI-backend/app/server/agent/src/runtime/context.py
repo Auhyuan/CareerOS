@@ -16,7 +16,7 @@ class AgentRuntimeContext(BaseModel):
     sys_var: dict[str, Any] = Field(default_factory=dict, description="系统变量，例如 thread_id")
     user_var: dict[str, Any] = Field(default_factory=dict, description="用户变量或编排层输入变量")
     inputs: dict[str, Any] = Field(default_factory=dict, description="业务输入变量")
-    files: list[dict[str, Any]] = Field(default_factory=list, description="附件上下文")
+    file_ids: list[str] = Field(default_factory=list, description="附件文件 ID 列表")
     allowed_tools: list[str] = Field(default_factory=list, description="本次运行允许调用的工具")
     optional_features: dict[str, Any] = Field(default_factory=dict, description="本次运行开启的增强能力")
     memory_enabled: bool = Field(default=False, description="本次运行是否启用长期记忆")

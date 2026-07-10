@@ -65,7 +65,7 @@ export interface AgentRunRequestPayload {
   payload?: Record<string, unknown>
   system_prompt?: string
   inputs?: Record<string, unknown>
-  files?: Array<Record<string, unknown>>
+  file_ids?: string[]
   tools?: string[]
   optional_features?: {
     long_term_memory_enabled?: boolean

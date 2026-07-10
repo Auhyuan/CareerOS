@@ -1,4 +1,5 @@
 from app.server.agent.src.middlewares.factory import MiddlewareFactory
+from app.server.agent.src.middlewares.file_context_middleware import FileContextMiddleware
 from app.server.agent.src.middlewares.interrupt_middleware import InterruptMiddleware
 from app.server.agent.src.middlewares.memory_placeholder_middleware import MemoryPlaceholderMiddleware
 from app.server.agent.src.middlewares.planning_middleware import PlanningMiddleware
@@ -9,6 +10,7 @@ from app.server.agent.src.middlewares.tool_error_handler_middleware import ToolE
 from app.server.agent.src.middlewares.tool_logging_middleware import ToolLoggingMiddleware
 
 __all__ = [
+    "FileContextMiddleware",
     "InjectRetrievalContextMiddleware",
     "InterruptMiddleware",
     "MemoryPlaceholderMiddleware",

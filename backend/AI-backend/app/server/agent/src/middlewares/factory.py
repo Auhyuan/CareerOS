@@ -1,4 +1,5 @@
 from app.server.agent.src.middlewares.a2a_context_middleware import A2AAgentContextMiddleware
+from app.server.agent.src.middlewares.file_context_middleware import FileContextMiddleware
 from app.server.agent.src.middlewares.interrupt_middleware import InterruptMiddleware
 from app.server.agent.src.middlewares.memory_placeholder_middleware import MemoryPlaceholderMiddleware
 from app.server.agent.src.middlewares.planning_middleware import PlanningMiddleware
@@ -52,6 +53,9 @@ class MiddlewareFactory:
         if current_features.enable_memory:
             middlewares.append(MemoryPlaceholderMiddleware())
 
+        # 附件上下文注入：默认始终装配。file_ids 为空时该中间件 no-op。
+        middlewares.append(FileContextMiddleware())
+
         # 检索上下文注入：默认始终装配。无检索内容时该中间件 no-op。
         middlewares.append(InjectRetrievalContextMiddleware())
 
@@ -83,6 +87,7 @@ class MiddlewareFactory:
             names.append("InterruptMiddleware")
         if current_features.enable_memory:
             names.append("MemoryPlaceholderMiddleware")
+        names.append("FileContextMiddleware")
         names.append("InjectRetrievalContextMiddleware")
         names.append("A2AAgentContextMiddleware")
 

@@ -97,6 +97,7 @@ class AgentService:
         # 向后兼容：API 层通过 agent_service.tool_service 访问工具列表。
         self.tool_service = self.assembler.tool_service
 
+
     # ── 同步执行 ────────────────────────────────────────────────
 
     async def run(self, request: AgentRunRequest, db: Session | None = None) -> AgentRunResponse:
@@ -114,7 +115,8 @@ class AgentService:
         # 第一步：如果传入 agent_id，先加载模板并合并本次运行覆盖配置。
         request = self.lifecycle_service.resolve_template_request(request, db)
 
-        # 第二步：构建上下文、写入用户消息，并创建 agent_runs 主运行记录。
+        # 第二步：构建运行上下文、写入用户消息，并创建 agent_runs 主运行记录。
+        # 附件解析与注入交给 FileContextMiddleware 处理，避免 AgentService 堆积业务能力。
         context, context_enabled, run_record_enabled = self.lifecycle_service.prepare_run_context(request, db)
 
         try:
@@ -132,6 +134,7 @@ class AgentService:
             raise
 
         # 第三步：只传入本轮用户消息；跨轮 Agent 记忆由 checkpointer 根据 thread_id 恢复。
+        # 附件内容由 FileContextMiddleware 注入 system prompt，不改写用户原始 query。
         input_messages = [{"role": "user", "content": request.query}]
         logger.info("Agent 执行开始: run_id=%s thread_id=%s", context.run_id, context.thread_id)
         try:
@@ -267,7 +270,8 @@ class AgentService:
         # 第一步：如果传入 agent_id，先加载模板并合并本次运行覆盖配置。
         request = self.lifecycle_service.resolve_template_request(request, db)
 
-        # 第二步：构建上下文、写入用户消息，并创建 agent_runs 主运行记录。
+        # 第二步：构建运行上下文、写入用户消息，并创建 agent_runs 主运行记录。
+        # 附件解析与注入交给 FileContextMiddleware 处理，避免 AgentService 堆积业务能力。
         context, context_enabled, run_record_enabled = self.lifecycle_service.prepare_run_context(request, db)
         yield {
             "type": "run_start",
@@ -291,6 +295,7 @@ class AgentService:
             }
 
             # 第三步：只传入本轮用户消息；跨轮 Agent 记忆由 checkpointer 根据 thread_id 恢复。
+            # 附件内容由 FileContextMiddleware 注入 system prompt，不改写用户原始 query。
             input_messages = [{"role": "user", "content": request.query}]
             invoke_config = self._build_langgraph_config(context)
             answer_parts: list[str] = []

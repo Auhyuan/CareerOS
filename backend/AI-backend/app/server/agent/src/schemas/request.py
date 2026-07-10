@@ -96,7 +96,7 @@ class AgentRunRequest(BaseModel):
     stream: bool = Field(default=False, description="是否使用 SSE 流式返回。")
     system_prompt: str | None = Field(default=None, description="本次运行使用的系统提示词。")
     inputs: dict[str, Any] = Field(default_factory=dict, description="编排层注入的业务变量。")
-    files: list[dict[str, Any]] = Field(default_factory=list, description="附件上下文预留字段。")
+    file_ids: list[str] = Field(default_factory=list, description="附件文件 ID 列表。")
     tools: list[str] = Field(
         default_factory=list,
         description="本次运行允许加载的常规工具名称；A2A 工具由 a2a.sub_agent_list 动态控制。",
@@ -153,7 +153,7 @@ class AgentMessageRequest(BaseModel):
     stream: bool = Field(default=True, description="是否使用 SSE 流式返回。")
     system_prompt: str | None = Field(default=None, description="新任务运行时使用的临时系统提示词。")
     inputs: dict[str, Any] = Field(default_factory=dict, description="新任务运行时注入的业务变量。")
-    files: list[dict[str, Any]] = Field(default_factory=list, description="附件上下文预留字段。")
+    file_ids: list[str] = Field(default_factory=list, description="附件文件 ID 列表。")
     tools: list[str] = Field(default_factory=list, description="新任务运行时允许加载的常规工具名称。")
     optional_features: AgentOptionalFeatures = Field(
         default_factory=AgentOptionalFeatures,

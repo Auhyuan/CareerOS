@@ -46,7 +46,7 @@ class AgentRuntimeContextService:
             sys_var={"thread_id": thread_id, "run_id": run_id},
             user_var=request.inputs,
             inputs=request.inputs,
-            files=request.files,
+            file_ids=request.file_ids,
             allowed_tools=request.tools,
             optional_features=optional_features,
             memory_enabled=request.optional_features.long_term_memory_enabled,

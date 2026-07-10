@@ -127,7 +127,7 @@ class AgentMessageService:
             stream=stream,
             system_prompt=request.system_prompt,
             inputs=self._build_run_inputs(request),
-            files=request.files,
+            file_ids=request.file_ids,
             tools=request.tools,
             optional_features=request.optional_features,
             a2a=request.a2a,

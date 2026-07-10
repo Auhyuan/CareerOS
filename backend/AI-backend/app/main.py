@@ -15,6 +15,7 @@ from app.common.core.exceptions import register_exception_handlers
 from app.common.core.lifespan import app_lifespan
 from app.common.schemas.result import Result
 from app.server.agent.api import router as agent_router
+from app.server.file.api import router as file_router
 
 
 def create_app() -> FastAPI:
@@ -23,6 +24,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
     register_exception_handlers(app)
     app.include_router(agent_router, prefix="/agent", tags=["agent service"])
+    app.include_router(file_router, tags=["file service"])
 
     @app.get("/")
     def root_endpoint():
@@ -44,7 +46,7 @@ def print_startup_banner() -> None:
     host = os.getenv("FASTAPI_HOST", "127.0.0.1")
     port = os.getenv("FASTAPI_PORT", "8090")
     print(f"AI-backend starting: http://{host}:{port}")
-    print("Public modules: /agent")
+    print("Public modules: /agent, /file")
 
 
 if __name__ == "__main__":
