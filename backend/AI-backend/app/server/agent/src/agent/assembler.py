@@ -88,6 +88,7 @@ class AgentAssembler:
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
             tool_names=request.tools,
             a2a=request.a2a,
+            context_summarization=request.context_summarization,
             features=features,
         )
         logger.info(
@@ -145,27 +146,53 @@ class AgentAssembler:
             from app.server.agent.src.tools.a2a_tool import a2a_call
             tools.append(a2a_call)
 
-        # 第四步：构建 LangChain runtime context schema。
-        context_schema = self.runtime_context_service.get_context_schema()
-
-        # 第五步：创建中间件实例，并提取中间件声明的 LangGraph state schema。
-        middlewares = self.middleware_factory.build_langchain_middlewares(features)
-        middleware_names = self.middleware_factory.describe_middlewares(features)
-        state_schema_names = self.middleware_factory.describe_state_schemas(middlewares)
-        logger.info(
-            "中间件装配完成: thread_id=%s middlewares=%s state_schemas=%s",
-            context.thread_id,
-            middleware_names,
-            state_schema_names,
-        )
-
-        # 第六步：创建聊天模型。
+        # 第四步：创建主聊天模型。
         model = self.model_service.create_chat_model(
             db=db,
             model_code=request.runtime_options.model_code,
             temperature=request.runtime_options.temperature,
             timeout_seconds=request.runtime_options.timeout_seconds,
             max_retries=request.runtime_options.max_retries,
+        )
+
+        # 模板存在会话总结配置且本次为持久化会话时，创建独立总结模型。
+        # 无 conversation_id 的 A2A 或一次性调用没有跨轮上下文，不装配会话总结。
+        summary_model = None
+        if build_config.context_summarization is not None and request.conversation_id:
+            summary_model = self.model_service.create_chat_model(
+                db=db,
+                model_code=build_config.context_summarization.model_code,
+                temperature=0,
+                timeout_seconds=request.runtime_options.timeout_seconds,
+                max_retries=request.runtime_options.max_retries,
+            )
+            logger.info(
+                "会话总结模型已就绪: thread_id=%s model_code=%s",
+                context.thread_id,
+                build_config.context_summarization.model_code,
+            )
+        elif build_config.context_summarization is not None:
+            logger.info("会话总结已跳过: thread_id=%s reason=empty_conversation_id", context.thread_id)
+
+        # 第五步：构建 LangChain runtime context schema。
+        context_schema = self.runtime_context_service.get_context_schema()
+
+        # 第六步：创建中间件实例，并提取中间件声明的 LangGraph state schema。
+        middlewares = self.middleware_factory.build_langchain_middlewares(
+            features,
+            summary_model=summary_model,
+            context_summarization=build_config.context_summarization if summary_model is not None else None,
+        )
+        middleware_names = self.middleware_factory.describe_middlewares(
+            features,
+            context_summarization_enabled=summary_model is not None,
+        )
+        state_schema_names = self.middleware_factory.describe_state_schemas(middlewares)
+        logger.info(
+            "中间件装配完成: thread_id=%s middlewares=%s state_schemas=%s",
+            context.thread_id,
+            middleware_names,
+            state_schema_names,
         )
 
         # 第七步：获取 LangGraph checkpointer。
@@ -211,6 +238,11 @@ class AgentAssembler:
             context=context,
             metadata={
                 "model_code": request.runtime_options.model_code,
+                "context_summarization_model_code": (
+                    build_config.context_summarization.model_code
+                    if summary_model is not None and build_config.context_summarization is not None
+                    else None
+                ),
                 "tool_count": len(tools),
                 "tools": [getattr(tool, "name", tool.__class__.__name__) for tool in tools],
                 "middlewares": middleware_names,

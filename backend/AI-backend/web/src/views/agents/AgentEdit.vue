@@ -114,6 +114,45 @@
         </a-row>
       </a-card>
 
+
+      <!-- 会话上下文总结配置（config.context_summarization） -->
+      <a-card title="会话上下文总结" class="mb-4">
+        <a-form-item label="启用会话总结">
+          <a-switch v-model:checked="contextSummarizationEnabled" />
+          <span class="text-gray-500 ml-2">开启后，Agent 会使用独立模型压缩过长的会话工作上下文</span>
+        </a-form-item>
+        <template v-if="contextSummarizationEnabled && form.config.context_summarization">
+          <a-row :gutter="16">
+            <a-col :span="8">
+              <a-form-item label="总结模型" required>
+                <a-select
+                  v-model:value="form.config.context_summarization.model_code"
+                  placeholder="选择已启用的 Chat 模型"
+                  :options="modelOptions"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col :span="8">
+              <a-form-item label="触发 Token 阈值">
+                <a-input-number v-model:value="form.config.context_summarization.trigger_tokens" :min="1" style="width: 100%" />
+              </a-form-item>
+            </a-col>
+            <a-col :span="8">
+              <a-form-item label="保留近期消息数">
+                <a-input-number v-model:value="form.config.context_summarization.keep_messages" :min="1" style="width: 100%" />
+              </a-form-item>
+            </a-col>
+          </a-row>
+          <a-row :gutter="16">
+            <a-col :span="8">
+              <a-form-item label="总结输入 Token 上限">
+                <a-input-number v-model:value="form.config.context_summarization.trim_tokens_to_summarize" :min="1" style="width: 100%" />
+              </a-form-item>
+            </a-col>
+          </a-row>
+        </template>
+      </a-card>
+
       <!-- 可选能力（config.optional_features） -->
       <a-card title="可选能力 (optional_features)" class="mb-4">
         <a-form-item label="长期记忆">
@@ -195,6 +234,22 @@ const form = reactive<AgentTemplate>({
       planning_enabled: false,
     },
     a2a: null,
+    context_summarization: null,
+  },
+})
+
+/** 会话总结开关映射到配置对象是否存在，不在后端保存 enabled 字段。 */
+const contextSummarizationEnabled = computed({
+  get: () => !!form.config.context_summarization,
+  set: (enabled: boolean) => {
+    form.config.context_summarization = enabled
+      ? {
+          model_code: '',
+          trigger_tokens: 12000,
+          keep_messages: 20,
+          trim_tokens_to_summarize: 4000,
+        }
+      : null
   },
 })
 
@@ -256,6 +311,7 @@ async function loadDetail() {
       ...(detail.config?.optional_features || {}),
     },
     a2a: detail.config?.a2a || null,
+    context_summarization: detail.config?.context_summarization || null,
   }
   a2aSubAgentList.value = detail.config?.a2a?.sub_agent_list || []
 }
@@ -266,6 +322,10 @@ async function onSubmit() {
   form.config.a2a = a2aSubAgentList.value.length
     ? { sub_agent_list: [...a2aSubAgentList.value] }
     : null
+  if (form.config.context_summarization && !form.config.context_summarization.model_code.trim()) {
+    message.warning('请为会话上下文总结选择模型')
+    return
+  }
 
   saving.value = true
   try {

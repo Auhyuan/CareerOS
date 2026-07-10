@@ -52,7 +52,8 @@
 - `file_ids` 是附件上下文。
 - `tools` 是本次允许加载的 MCP 外接工具编码白名单；A2A、规划等内置工具不允许写在这里。
 - `optional_features` 是本次运行的能力开关。
-- `runtime_options` 是模型运行参数。
+- `context_summarization` 仅由 Agent 模板配置；对象存在时启用独立的会话总结模型和中间件。
+- `runtime_options` 是主 Agent 模型运行参数。
 - `runtime_options.model` 是 Agent 根目录 `model_gateway.yaml` 中的模型别名，空值使用网关默认聊天模型。
 
 ## 总体生命周期

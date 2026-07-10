@@ -216,6 +216,11 @@
                   </div>
                 </div>
 
+                <div v-else-if="block.type === 'context_summary'" class="message-context-summary">
+                  <a-spin v-if="block.status === 'running'" size="small" />
+                  <span>{{ block.status === 'running' ? '正在总结会话上下文' : block.status === 'completed' ? '会话上下文总结完成' : block.message || '会话上下文总结失败，已继续使用原始上下文' }}</span>
+                </div>
+
                 <div v-else-if="block.type === 'interrupt'" class="message-interrupt">
                   <div class="interrupt-header">
                     <span class="interrupt-icon">⏸</span>
@@ -252,6 +257,11 @@
             </template>
             <!-- 用户消息正文 -->
             <div v-else-if="msg.content" class="message-content">{{ msg.content }}</div>
+            <div v-if="msg.role === 'user' && msg.file_names?.length" class="message-file-list">
+              <span v-for="fileName in msg.file_names" :key="fileName" class="message-file-chip">
+                <PaperClipOutlined /> {{ fileName }}
+              </span>
+            </div>
             <!-- 元信息:耗时、回答长度、run_id 短码(完成时展示) -->
             <div
               v-if="(msg.elapsed_ms !== undefined || msg.answer_length !== undefined) && !running"
@@ -295,7 +305,24 @@
 
     <!-- 输入区 -->
     <div class="input-area">
+      <div v-if="uploadedFiles.length || uploadingFiles" class="attachment-tray">
+        <a-spin v-if="uploadingFiles" size="small" />
+        <span v-if="uploadingFiles" class="attachment-uploading">正在上传并解析附件...</span>
+        <span v-for="file in uploadedFiles" :key="file.file_id" class="attachment-chip">
+          <PaperClipOutlined />
+          <span class="attachment-name" :title="file.original_name">{{ file.original_name }}</span>
+          <button type="button" class="attachment-remove" :disabled="running" @click="removeUploadedFile(file.file_id)">
+            <CloseOutlined />
+          </button>
+        </span>
+      </div>
       <div class="input-wrap">
+        <input ref="fileInput" class="file-input-hidden" type="file" multiple @change="onFilesSelected" />
+        <a-tooltip title="上传附件">
+          <a-button class="attach-btn" :disabled="inputDisabled || uploadingFiles" @click="openFilePicker">
+            <template #icon><PaperClipOutlined /></template>
+          </a-button>
+        </a-tooltip>
         <a-textarea
           v-model:value="input"
           :rows="1"
@@ -309,7 +336,7 @@
           type="primary"
           class="send-btn"
           :loading="running"
-          :disabled="inputDisabled || !input.trim()"
+          :disabled="inputDisabled || (!input.trim() && !uploadedFiles.length)"
           @click="onRun"
         >
           <template #icon v-if="!running"><SendOutlined /></template>
@@ -346,6 +373,8 @@ import {
   SettingOutlined,
   SendOutlined,
   ThunderboltOutlined,
+  PaperClipOutlined,
+  CloseOutlined,
 } from '@ant-design/icons-vue'
 import {
   getAgentTemplateDetail,
@@ -353,6 +382,7 @@ import {
   type AgentTemplate,
 } from '@/api/agentTemplate'
 import { runAgentStream } from '@/api/agentRun'
+import { deleteAgentFiles, uploadAgentFiles, type UploadedFileView } from '@/api/file'
 import MarkdownView from '@/components/MarkdownView.vue'
 
 defineOptions({ name: 'AgentInvokeView' })
@@ -373,9 +403,12 @@ const agentName = ref<string>('Agent')
 const conversationId = ref<string>('')
 const input = ref('')
 const running = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+const uploadingFiles = ref(false)
+const uploadedFiles = ref<UploadedFileView[]>([])
 
 /** Agent 流式展示块,用于按事件到达顺序渲染思考、工具调用、任务计划、中断确认和正式回复。 */
-type StreamBlock = ReasoningBlock | ContentBlock | ToolCallBlock | TaskPlanBlock | InterruptBlock
+type StreamBlock = ReasoningBlock | ContentBlock | ToolCallBlock | TaskPlanBlock | InterruptBlock | ContextSummaryBlock
 
 /** 思考过程块。 */
 interface ReasoningBlock {
@@ -425,6 +458,14 @@ interface TaskPlanBlock {
   task_plan: Record<string, any>
 }
 
+
+/** 会话上下文总结状态块，不展示内部摘要正文。 */
+interface ContextSummaryBlock {
+  type: 'context_summary'
+  status: 'running' | 'completed' | 'failed'
+  message?: string
+}
+
 /** 中断确认展示块。 */
 interface InterruptBlock {
   type: 'interrupt'
@@ -447,6 +488,8 @@ interface MessageItem {
   elapsed_ms?: number
   /** 本次 run 的回答长度,来自 run_end 事件 */
   answer_length?: number
+  /** 用户本轮随消息提交的附件名称，仅用于聊天记录展示。 */
+  file_names?: string[]
 }
 const messages = ref<MessageItem[]>([])
 const messageArea = ref<HTMLDivElement | null>(null)
@@ -484,6 +527,40 @@ const inputPlaceholder = computed(() => {
   if (!selectedAgentId.value) return '请先选择 Agent 模板'
   return '输入你的问题, Enter 发送, Shift+Enter 换行'
 })
+
+/** 打开系统文件选择器。 */
+function openFilePicker() {
+  fileInput.value?.click()
+}
+
+/** 上传用户选择的文件，并缓存本次消息需要提交的 file_id。 */
+async function onFilesSelected(event: Event) {
+  const target = event.target as HTMLInputElement
+  const files = Array.from(target.files || [])
+  target.value = ''
+  if (!files.length) return
+
+  uploadingFiles.value = true
+  try {
+    const result = await uploadAgentFiles(files)
+    uploadedFiles.value.push(...(result.files || []))
+    message.success(`已上传 ${result.files?.length || 0} 个附件`)
+  } catch {
+    message.error('附件上传失败')
+  } finally {
+    uploadingFiles.value = false
+  }
+}
+
+/** 删除尚未发送给 Agent 的附件，并同步清理服务端文件。 */
+async function removeUploadedFile(fileId: string) {
+  try {
+    await deleteAgentFiles([fileId])
+    uploadedFiles.value = uploadedFiles.value.filter((file) => file.file_id !== fileId)
+  } catch {
+    message.error('删除附件失败')
+  }
+}
 
 /** 生成临时会话 ID */
 function uuid() {
@@ -532,6 +609,7 @@ function onAgentChange(agentId: string) {
   selectedAgentId.value = agentId
   messages.value = []
   input.value = ''
+  uploadedFiles.value = []
   stickToBottom.value = true
   if (!conversationId.value) {
     conversationId.value = uuid()
@@ -544,6 +622,7 @@ function newConversation() {
   conversationId.value = uuid()
   messages.value = []
   input.value = ''
+  uploadedFiles.value = []
   stickToBottom.value = true
   message.success('已新建会话')
 }
@@ -1129,6 +1208,29 @@ function markInterruptAnswered(messageIndex: number, blockIndex: number) {
   })
 }
 
+/** 在当前 Assistant 时间线追加会话总结状态块。 */
+function appendContextSummaryBlock(index: number, status: ContextSummaryBlock['status'], summaryMessage = '') {
+  updateAssistantMessage(index, (current) => ({
+    ...current,
+    blocks: [...current.blocks, { type: 'context_summary', status, message: summaryMessage }],
+  }))
+}
+
+/** 更新当前 Assistant 时间线最后一个会话总结状态块。 */
+function updateContextSummaryBlock(index: number, status: ContextSummaryBlock['status'], summaryMessage = '') {
+  updateAssistantMessage(index, (current) => {
+    const blocks = [...current.blocks]
+    for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex -= 1) {
+      const block = blocks[blockIndex]
+      if (block.type === 'context_summary') {
+        blocks[blockIndex] = { ...block, status, message: summaryMessage || block.message }
+        return { ...current, blocks }
+      }
+    }
+    return { ...current, blocks: [...blocks, { type: 'context_summary', status, message: summaryMessage }] }
+  })
+}
+
 /** 创建一条新的 assistant 流式消息，并返回它在 messages 中的位置。 */
 async function createAssistantStreamMessage(): Promise<number> {
   messages.value.push({ role: 'assistant', content: '', reasoning: '', tool_calls: [], blocks: [], time: now() })
@@ -1155,6 +1257,23 @@ function handleAgentStreamEvent(index: number, event: Record<string, any>) {
   // 子 Agent 事件：挂到对应 a2a_call 工具卡片下方，避免和主 Agent 输出混在一起。
   if (event.type === 'sub_agent_event') {
     appendSubAgentEventBlock(index, data)
+    scrollToBottom()
+    return
+  }
+
+  // 会话总结：仅展示状态，不展示内部摘要内容。
+  if (event.type === 'context_summary_started') {
+    appendContextSummaryBlock(index, 'running')
+    scrollToBottom()
+    return
+  }
+  if (event.type === 'context_summary_completed') {
+    updateContextSummaryBlock(index, 'completed')
+    scrollToBottom()
+    return
+  }
+  if (event.type === 'context_summary_failed') {
+    updateContextSummaryBlock(index, 'failed', String(data.message || ''))
     scrollToBottom()
     return
   }
@@ -1279,14 +1398,24 @@ async function onRun() {
     message.warning('请先选择一个 Agent')
     return
   }
-  const text = input.value.trim()
-  if (!text) {
-    message.warning('请输入问题')
+  const text = input.value.trim() || '请查看我上传的附件内容。'
+  const currentFiles = [...uploadedFiles.value]
+  if (!input.value.trim() && !currentFiles.length) {
+    message.warning('请输入问题或上传附件')
     return
   }
 
-  messages.value.push({ role: 'user', content: text, reasoning: '', tool_calls: [], blocks: [], time: now() })
+  messages.value.push({
+    role: 'user',
+    content: text,
+    reasoning: '',
+    tool_calls: [],
+    blocks: [],
+    time: now(),
+    file_names: currentFiles.map((file) => file.original_name),
+  })
   input.value = ''
+  uploadedFiles.value = []
 
   try {
     await executeAgentStream({
@@ -1295,6 +1424,7 @@ async function onRun() {
       conversation_id: ensureConversationId(),
       message_type: 'text',
       payload: {},
+      file_ids: currentFiles.map((file) => file.file_id),
     })
   } catch (e) {
     running.value = false
@@ -2183,6 +2313,81 @@ onMounted(async () => {
   padding: 0 !important;
   background: transparent !important;
 }
+.attachment-tray {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 860px;
+  margin: 0 auto 8px;
+  flex-wrap: wrap;
+}
+.attachment-uploading {
+  font-size: 12px;
+  color: #595959;
+}
+.attachment-chip,
+.message-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  background: #e6f4ff;
+  color: #0958d9;
+  font-size: 12px;
+}
+.attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #0958d9;
+  cursor: pointer;
+}
+.attachment-remove:disabled {
+  cursor: not-allowed;
+  color: #bfbfbf;
+}
+.file-input-hidden {
+  display: none;
+}
+.attach-btn {
+  flex: 0 0 auto;
+  border: 0;
+  box-shadow: none;
+}
+.message-file-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.message-user .message-file-chip {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+.message-context-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 7px 10px;
+  border-left: 3px solid #1677ff;
+  border-radius: 4px;
+  background: #e6f4ff;
+  color: #0958d9;
+  font-size: 12px;
+}
+
 .send-btn {
   height: 36px;
   min-width: 80px;

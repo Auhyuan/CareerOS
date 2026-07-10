@@ -32,6 +32,9 @@ class AgentStreamEventParser:
         if suppress_sub_agent and self.is_sub_agent_stream_metadata(metadata_dict):
             logger.debug("过滤裸子 Agent 流式分片: metadata=%s", metadata_dict)
             return []
+        if self.is_summarization_stream_metadata(metadata_dict) or self.is_summarization_message(message):
+            logger.debug("过滤会话总结内部流式分片: metadata=%s", metadata_dict)
+            return []
 
         self.log_raw_stream_chunk(message, metadata)
 
@@ -122,6 +125,20 @@ class AgentStreamEventParser:
             "checkpoint_ns": metadata_dict.get("checkpoint_ns"),
         }
         logger.debug("流式 metadata 诊断: %s", summary)
+
+    def is_summarization_message(self, message: Any) -> bool:
+        """判断消息对象是否为总结中间件写回的内部摘要消息。"""
+        additional_kwargs = getattr(message, "additional_kwargs", None) or {}
+        response_metadata = getattr(message, "response_metadata", None) or {}
+        return (
+            additional_kwargs.get("lc_source") == "summarization"
+            or response_metadata.get("lc_source") == "summarization"
+        )
+
+    def is_summarization_stream_metadata(self, metadata: dict[str, Any]) -> bool:
+        """判断当前分片是否属于会话总结模型的内部输出。"""
+        tags = metadata.get("tags") or []
+        return metadata.get("lc_source") == "summarization" or "nostream" in tags
 
     def is_sub_agent_stream_metadata(self, metadata: dict[str, Any]) -> bool:
         """判断当前 metadata 是否属于 A2A 子 Agent 的裸流式分片。

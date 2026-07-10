@@ -271,7 +271,48 @@ Agent 正式回复正文增量输出。
 - 这是用户最终可见回答的主要来源。
 - 流式模式下后端不额外发送 `final` 事件，最终正文由前端累计 `model_delta` 得到。
 
-### 6. tool_call
+### 6. context_summary_started / context_summary_completed
+
+Agent 在模型调用前发现会话上下文过长时，会先压缩早期工作记忆。这两个事件只表示内部总结状态，不包含摘要正文。
+
+```json
+{
+  "type": "context_summary_started",
+  "data": {
+    "run_id": "run_xxx"
+  }
+}
+```
+
+```json
+{
+  "type": "context_summary_completed",
+  "data": {
+    "run_id": "run_xxx"
+  }
+}
+```
+
+总结失败时会收到：
+
+```json
+{
+  "type": "context_summary_failed",
+  "data": {
+    "run_id": "run_xxx",
+    "message": "上下文总结失败，本轮将继续使用原始上下文。"
+  }
+}
+```
+
+前端建议：
+
+- `context_summary_started`：展示轻量状态“正在总结会话上下文”。
+- `context_summary_completed`：更新为“会话上下文总结完成”，随后继续展示 Agent 正常输出。
+- `context_summary_failed`：展示轻量提示，但不能终止当前 Agent 的 loading；主 Agent 会继续执行。
+- 不展示摘要正文、Token 或思考过程。
+
+### 7. tool_call
 
 模型准备调用工具。
 
@@ -298,7 +339,7 @@ Agent 正式回复正文增量输出。
 - 普通聊天正文不要展示工具参数。
 - 调试面板可以展示 `args` 和 `metadata`。
 
-### 7. tool_result
+### 8. tool_result
 
 工具执行完成后的返回结果。
 
@@ -323,7 +364,7 @@ Agent 正式回复正文增量输出。
 - 可以展示在工具调用记录面板中。
 - 如果是普通用户聊天界面，可以只展示“工具调用完成”。
 
-### 8. task_plan
+### 9. task_plan
 
 任务计划发生变化。规划模式开启后，Agent 调用 `set_task_plan` 或 `update_task_step` 时会推送该事件。
 
@@ -358,7 +399,7 @@ Agent 正式回复正文增量输出。
 - `status=completed` 时展示完成态。
 - `status=cancelled` 时展示取消态。
 
-### 9. interrupt
+### 10. interrupt
 
 Agent 主动暂停，等待用户操作。
 
@@ -385,7 +426,7 @@ Agent 主动暂停，等待用户操作。
 - `plan_confirmation` 渲染任务计划确认卡片。
 - 用户操作后继续调用 `POST /agent/messages`，不要调用底层恢复接口。
 
-### 10. run_end
+### 11. run_end
 
 表示本次流式运行结束。
 
@@ -426,7 +467,7 @@ Agent 主动暂停，等待用户操作。
 - `status=interrupted`：关闭普通 loading，但保留“等待用户操作”的 UI 状态。
 - `answer_length` 可用于判断本次是否产生了正文。
 
-### 11. error
+### 12. error
 
 运行失败。
 
@@ -456,6 +497,9 @@ export type AgentStreamEventType =
   | 'agent_assembled'
   | 'reasoning_delta'
   | 'model_delta'
+  | 'context_summary_started'
+  | 'context_summary_completed'
+  | 'context_summary_failed'
   | 'tool_call'
   | 'tool_result'
   | 'task_plan'

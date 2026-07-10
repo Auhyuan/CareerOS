@@ -78,7 +78,8 @@ class AgentRunLifecycleService:
             合并模板后的 AgentRunRequest；未传 agent_id 时原样返回。
         """
         if not request.agent_id:
-            return request
+            # 会话总结只能由 Agent 模板配置启用，不能通过普通运行请求临时挂载。
+            return request.model_copy(update={"context_summarization": None}, deep=True)
 
         template_config = self.load_template_config(request.agent_id, db)
         update_data = {
@@ -88,6 +89,8 @@ class AgentRunLifecycleService:
             "tools": list(template_config.tools or request.tools or []),
             "optional_features": template_config.optional_features or request.optional_features,
             "a2a": template_config.a2a if template_config.a2a is not None else request.a2a,
+            # 会话总结只接受模板配置，不允许请求体覆盖。
+            "context_summarization": template_config.context_summarization,
             "runtime_options": self.resolve_template_runtime_options(
                 template_config.runtime_options,
                 request.runtime_options,
@@ -194,6 +197,11 @@ class AgentRunLifecycleService:
                     "optional_features": request.optional_features.model_dump(mode="python"),
                     "a2a": request.a2a.model_dump(mode="python") if request.a2a else None,
                     "a2a_sub_agent_list": request.a2a.sub_agent_list if request.a2a else [],
+                    "context_summarization": (
+                        request.context_summarization.model_dump(mode="python")
+                        if request.context_summarization
+                        else None
+                    ),
                     "runtime_options": request.runtime_options.model_dump(mode="python"),
                     "model_code": request.runtime_options.model_code,
                 },

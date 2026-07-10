@@ -88,6 +88,7 @@ class AgentResumeService:
             tools=list(metadata.get("tools") or []),
             optional_features=AgentOptionalFeatures(**optional_features_data),
             a2a=AgentA2AConfig(**a2a_data) if isinstance(a2a_data, dict) else None,
+            context_summarization=metadata.get("context_summarization"),
             runtime_options=ModelRuntimeOptions(**runtime_options_data),
         )
 

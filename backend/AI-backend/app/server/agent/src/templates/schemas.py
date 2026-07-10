@@ -1,5 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.server.agent.src.schemas.context_summarization import ContextSummarizationConfig
 from app.server.agent.src.schemas.request import AgentA2AConfig, AgentOptionalFeatures, ModelRuntimeOptions
 
 
@@ -19,6 +20,10 @@ class AgentTemplateConfig(BaseModel):
     a2a: AgentA2AConfig | None = Field(
         default=None,
         description="模板默认 A2A 配置；sub_agent_list 非空时，运行时可动态装配 a2a_call 工具。",
+    )
+    context_summarization: ContextSummarizationConfig | None = Field(
+        default=None,
+        description="会话上下文总结配置；对象存在即启用，空值表示不启用。",
     )
     runtime_options: ModelRuntimeOptions = Field(
         default_factory=ModelRuntimeOptions,

@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.server.agent.src.schemas.context_summarization import ContextSummarizationConfig
+
 
 class ModelRuntimeOptions(BaseModel):
     """单次模型调用的运行参数。
@@ -106,6 +108,10 @@ class AgentRunRequest(BaseModel):
         description="本次运行可选增强能力。",
     )
     a2a: AgentA2AConfig | None = Field(default=None, description="A2A 调用配置。")
+    context_summarization: ContextSummarizationConfig | None = Field(
+        default=None,
+        description="仅由 Agent 模板解析后写入的会话总结配置；普通调用方不应传入。",
+    )
     runtime_options: ModelRuntimeOptions = Field(
         default_factory=ModelRuntimeOptions,
         description="模型运行参数，必须包含可用 chat 模型的 model_code。",

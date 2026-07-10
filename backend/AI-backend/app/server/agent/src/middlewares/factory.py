@@ -1,4 +1,7 @@
+from typing import Any
+
 from app.server.agent.src.middlewares.a2a_context_middleware import A2AAgentContextMiddleware
+from app.server.agent.src.middlewares.conversation_summarization_middleware import ConversationSummarizationMiddleware
 from app.server.agent.src.middlewares.file_context_middleware import FileContextMiddleware
 from app.server.agent.src.middlewares.interrupt_middleware import InterruptMiddleware
 from app.server.agent.src.middlewares.memory_placeholder_middleware import MemoryPlaceholderMiddleware
@@ -8,17 +11,25 @@ from app.server.agent.src.middlewares.single_tool_call_middleware import SingleT
 from app.server.agent.src.middlewares.tool_args_inject_middleware import ToolArgsInjectMiddleware
 from app.server.agent.src.middlewares.tool_error_handler_middleware import ToolErrorHandlerMiddleware
 from app.server.agent.src.middlewares.tool_logging_middleware import ToolLoggingMiddleware
+from app.server.agent.src.schemas.context_summarization import ContextSummarizationConfig
 from app.server.agent.src.schemas.config import AgentFeatureConfig
 
 
 class MiddlewareFactory:
     """Agent 中间件工厂。"""
 
-    def build_langchain_middlewares(self, features: AgentFeatureConfig | None = None) -> list[object]:
+    def build_langchain_middlewares(
+        self,
+        features: AgentFeatureConfig | None = None,
+        summary_model: Any | None = None,
+        context_summarization: ContextSummarizationConfig | None = None,
+    ) -> list[object]:
         """根据内部能力配置创建 LangChain AgentMiddleware 列表。
 
         Args:
             features: Agent 内部装配能力开关。
+            summary_model: 模板配置的独立总结模型。
+            context_summarization: 模板会话总结策略；为空时不装配总结中间件。
 
         Returns:
             可传给 LangChain create_agent(middleware=...) 的中间件列表。
@@ -53,6 +64,17 @@ class MiddlewareFactory:
         if current_features.enable_memory:
             middlewares.append(MemoryPlaceholderMiddleware())
 
+        # 会话总结：仅模板显式配置且本次存在独立总结模型时装配。
+        if context_summarization is not None and summary_model is not None:
+            middlewares.append(
+                ConversationSummarizationMiddleware(
+                    summary_model,
+                    trigger=("tokens", context_summarization.trigger_tokens),
+                    keep=("messages", context_summarization.keep_messages),
+                    trim_tokens_to_summarize=context_summarization.trim_tokens_to_summarize,
+                )
+            )
+
         # 附件上下文注入：默认始终装配。file_ids 为空时该中间件 no-op。
         middlewares.append(FileContextMiddleware())
 
@@ -64,11 +86,16 @@ class MiddlewareFactory:
 
         return middlewares
 
-    def describe_middlewares(self, features: AgentFeatureConfig | None = None) -> list[str]:
+    def describe_middlewares(
+        self,
+        features: AgentFeatureConfig | None = None,
+        context_summarization_enabled: bool = False,
+    ) -> list[str]:
         """返回当前内部能力配置下会启用的中间件名称。
 
         Args:
             features: Agent 内部装配能力开关。
+            context_summarization_enabled: 当前模板是否成功启用会话总结。
 
         Returns:
             中间件名称列表。
@@ -87,6 +114,8 @@ class MiddlewareFactory:
             names.append("InterruptMiddleware")
         if current_features.enable_memory:
             names.append("MemoryPlaceholderMiddleware")
+        if context_summarization_enabled:
+            names.append("ConversationSummarizationMiddleware")
         names.append("FileContextMiddleware")
         names.append("InjectRetrievalContextMiddleware")
         names.append("A2AAgentContextMiddleware")

@@ -20,6 +20,14 @@ export interface AgentOptionalFeatures {
   planning_enabled?: boolean
 }
 
+/** 模板会话上下文总结配置；对象存在即启用该能力。 */
+export interface ContextSummarizationConfig {
+  model_code: string
+  trigger_tokens?: number
+  keep_messages?: number
+  trim_tokens_to_summarize?: number
+}
+
 /** Agent 模板运行配置（AgentTemplateConfig） */
 export interface AgentTemplateConfig {
   system_prompt?: string | null
@@ -27,6 +35,7 @@ export interface AgentTemplateConfig {
   optional_features?: AgentOptionalFeatures
   is_sub_agent?: boolean
   a2a?: { sub_agent_list?: string[] } | null
+  context_summarization?: ContextSummarizationConfig | null
   runtime_options?: ModelRuntimeOptions
   /** 模板 config 是 JSONB，后端 ConfigDict(extra='allow') 允许其他扩展字段。 */
   [key: string]: unknown
