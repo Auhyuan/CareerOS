@@ -26,9 +26,12 @@ class UploadedFileRecord(SQLModel, table=True):
     size_bytes: int = Field(default=0)
 
     status: str = Field(default="uploaded", max_length=30)
-    parse_status: str = Field(default="pending", max_length=30)
-    parse_error: str | None = Field(default=None)
-    parsed_text: str | None = Field(default=None)
+    content_path: str | None = Field(default=None)
+    content_type: str = Field(default="pending", max_length=30)
+    conversion_status: str = Field(default="pending", max_length=30)
+    conversion_error: str | None = Field(default=None)
+    converter_name: str | None = Field(default=None, max_length=100)
+    converted_at: datetime | None = Field(default=None)
 
     extra_metadata: dict | None = Field(default=None, sa_column=Column("metadata", JSONB, nullable=True))
 

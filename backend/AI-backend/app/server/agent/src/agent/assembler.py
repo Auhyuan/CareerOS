@@ -129,14 +129,15 @@ class AgentAssembler:
                 if getattr(planning_tool, "name", "") not in existing_tool_names:
                     tools.append(planning_tool)
 
-        # 第三步附加：附件读取工具动态注入。
-        # file_ids 非空表示本轮有可访问附件，此时自动给 Agent 装配 read_uploaded_file。
+        # 第三步附加：附件工具动态注入。
+        # file_ids 非空表示本轮有可访问附件；读取和关键词定位工具都由系统自动装配。
         if request.file_ids:
-            from app.server.agent.src.tools.file_tools import read_uploaded_file
+            from app.server.agent.src.tools.file_tools import read_uploaded_file, search_uploaded_files
 
             existing_tool_names = {getattr(tool, "name", tool.__class__.__name__) for tool in tools}
-            if getattr(read_uploaded_file, "name", "") not in existing_tool_names:
-                tools.append(read_uploaded_file)
+            for file_tool in [read_uploaded_file, search_uploaded_files]:
+                if getattr(file_tool, "name", "") not in existing_tool_names:
+                    tools.append(file_tool)
 
         # 第三步附加：A2A 工具动态注入。仅 a2a.sub_agent_list 非空时装配 a2a_call 工具。
         # 子 Agent 元信息查询和 system prompt 注入由 A2AAgentContextMiddleware 负责。

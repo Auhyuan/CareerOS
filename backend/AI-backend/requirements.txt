@@ -32,4 +32,4 @@ PyYAML==6.0.3
 typing_extensions==4.15.0
 
 python-multipart==0.0.20
-pypdf==6.4.0
+pymupdf4llm==1.28.0

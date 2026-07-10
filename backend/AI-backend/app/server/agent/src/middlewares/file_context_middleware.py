@@ -14,99 +14,79 @@ logger = logging.getLogger(__name__)
 
 
 class FileContextMiddleware(AgentMiddleware[CareerAgentState]):
-    """附件上下文中间件，负责把可访问附件清单注入模型上下文。"""
+    """附件上下文中间件，负责把文件清单和 Outline 注入模型上下文。"""
 
     def __init__(self, file_service: FileService | None = None):
-        """初始化附件上下文中间件。
-
-        Args:
-            file_service: 文件服务实例，不传时自动创建默认文件服务。
-        """
+        """初始化附件上下文中间件。"""
         self.file_service = file_service or FileService()
+        # Agent 每次请求都会重新组装中间件实例；该缓存只覆盖当前一次 Agent Run。
+        self._file_list_text: str | None = None
+        self._cached_file_ids: tuple[str, ...] | None = None
 
     def _get_runtime_context(self, request: ModelRequest) -> Any:
-        """读取 LangChain runtime context。
-
-        Args:
-            request: LangChain 模型调用请求。
-
-        Returns:
-            本次 Agent 运行上下文；可能是 dict，也可能是 Pydantic 对象。
-        """
+        """读取 LangChain runtime context。"""
         return getattr(request.runtime, "context", None)
 
     def _get_file_ids(self, request: ModelRequest) -> list[str]:
-        """从 runtime context 中读取附件文件 ID 列表。
-
-        Args:
-            request: LangChain 模型调用请求。
-
-        Returns:
-            附件文件 ID 列表。没有附件时返回空列表。
-        """
+        """从 runtime context 中读取附件文件 ID 列表。"""
         context = self._get_runtime_context(request)
-        if isinstance(context, dict):
-            file_ids = context.get("file_ids") or []
-        else:
-            file_ids = getattr(context, "file_ids", []) or []
-        if not isinstance(file_ids, list):
-            return []
-        return [str(file_id).strip() for file_id in file_ids if str(file_id or "").strip()]
+        file_ids = context.get("file_ids") if isinstance(context, dict) else getattr(context, "file_ids", [])
+        return [str(file_id).strip() for file_id in (file_ids or []) if str(file_id or "").strip()]
 
     def _get_run_id(self, request: ModelRequest) -> str:
-        """从 runtime context 中读取 run_id，方便日志排查。
-
-        Args:
-            request: LangChain 模型调用请求。
-
-        Returns:
-            当前 Agent run_id。读取不到时返回空字符串。
-        """
+        """从 runtime context 中读取 run_id，方便日志排查。"""
         context = self._get_runtime_context(request)
-        if isinstance(context, dict):
-            return str(context.get("run_id") or "")
-        return str(getattr(context, "run_id", "") or "")
+        return str(context.get("run_id") or "") if isinstance(context, dict) else str(getattr(context, "run_id", "") or "")
 
-    def _format_file_list(self, file_summaries: list[dict[str, object]]) -> str:
-        """把附件元信息格式化为模型可读的文件清单。
-
-        Args:
-            file_summaries: 文件元信息列表。
-
-        Returns:
-            文件清单文本，不包含文件正文。
-        """
+    def _format_outline(self, outline: object) -> list[str]:
+        """把单个文件 Outline 格式化为模型可读文本。"""
+        if not isinstance(outline, dict):
+            return []
         lines: list[str] = []
-        for index, item in enumerate(file_summaries, start=1):
+        total_lines = int(outline.get("total_lines") or 0)
+        total_heading_count = int(outline.get("total_heading_count") or 0)
+        displayed_heading_count = len(outline.get("entries") or [])
+        if total_lines:
+            lines.append(
+                f"  - 文档总长度：{total_lines} 行；标题总数：{total_heading_count}；"
+                f"已展示：{displayed_heading_count} 个标题。"
+            )
+        for entry in outline.get("entries") or []:
+            if isinstance(entry, dict):
+                lines.append(f"  - L{entry.get('line_number')}: {entry.get('title')}")
+        if not lines and outline.get("preview"):
+            lines.append("  Preview:")
+            lines.extend(f"  - {item}" for item in outline["preview"])
+        if outline.get("truncated"):
+            omitted_heading_count = int(outline.get("omitted_heading_count") or 0)
+            lines.append(
+                f"  - Outline 已截断，后续还有 {omitted_heading_count} 个标题未展示；"
+                f"文档共 {total_lines} 行，请使用 start_line、end_line 分段读取。"
+            )
+        if outline.get("message"):
+            lines.append(f"  - {outline['message']}")
+        return lines
+
+    def _format_file_list(self, summaries: list[dict[str, object]]) -> str:
+        """把文件摘要格式化为模型可读清单。"""
+        lines: list[str] = []
+        for index, item in enumerate(summaries, start=1):
             file_id = str(item.get("file_id") or "")
-            if item.get("status") == "missing":
-                lines.append(f"{index}. file_id={file_id}; status=missing")
+            if item.get("status") in {"missing", "failed"}:
+                lines.append(f"{index}. file_id={file_id}; status={item.get('status')}; error={item.get('error') or ''}")
                 continue
             lines.append(
-                "{index}. file_id={file_id}; name={name}; extension={extension}; "
-                "mime_type={mime_type}; size_bytes={size_bytes}; parse_status={parse_status}".format(
-                    index=index,
-                    file_id=file_id,
-                    name=str(item.get("original_name") or ""),
-                    extension=str(item.get("extension") or ""),
-                    mime_type=str(item.get("mime_type") or ""),
-                    size_bytes=str(item.get("size_bytes") or 0),
-                    parse_status=str(item.get("parse_status") or ""),
-                )
+                f"{index}. file_id={file_id}; name={item.get('original_name')}; "
+                f"extension={item.get('extension')}; content_type={item.get('content_type')}; "
+                f"conversion_status={item.get('conversion_status')}"
             )
+            lines.extend(self._format_outline(item.get("outline")))
         return "\n".join(lines)
 
-    def _build_file_list_text(self, file_ids: list[str]) -> str:
-        """查询并格式化本次请求的附件清单。
-
-        Args:
-            file_ids: Agent 请求中的附件文件 ID 列表。
-
-        Returns:
-            附件清单文本。没有可用附件时返回空字符串。
-        """
+    async def _build_file_list_text(self, file_ids: list[str]) -> str:
+        """构建本次请求的附件清单与 Outline。"""
         with get_db_session() as db:
-            summaries = self.file_service.list_agent_file_summaries(db, file_ids)
+            summaries = await self.file_service.build_agent_file_summaries(db, file_ids)
         return self._format_file_list(summaries)
 
     async def awrap_model_call(
@@ -114,36 +94,31 @@ class FileContextMiddleware(AgentMiddleware[CareerAgentState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        """在模型调用前注入附件清单。
-
-        Args:
-            request: LangChain 模型调用请求。
-            handler: 下一个模型调用处理器。
-
-        Returns:
-            模型响应。没有附件时原样透传。
-        """
+        """在每次模型调用前注入附件地图，不注入附件全文。"""
         file_ids = self._get_file_ids(request)
         if not file_ids:
             return await handler(request)
 
-        file_list_text = self._build_file_list_text(file_ids)
+        normalized_file_ids = tuple(file_ids)
+        if self._cached_file_ids != normalized_file_ids:
+            # 第一次模型调用时抽 Outline；同一次 Agent Run 的后续模型调用直接复用。
+            self._file_list_text = await self._build_file_list_text(file_ids)
+            self._cached_file_ids = normalized_file_ids
+
+        file_list_text = self._file_list_text or ""
         if not file_list_text:
             return await handler(request)
 
-        run_id = self._get_run_id(request)
-        logger.info("附件清单注入成功: run_id=%s file_ids=%s", run_id, len(file_ids))
-
-        # 这里只注入清单，不注入正文。正文必须由 read_uploaded_file 工具按单个 file_id 读取。
+        logger.info("附件地图注入成功: run_id=%s file_ids=%s", self._get_run_id(request), len(file_ids))
         inserted = (
             "\n\n<uploaded_files>\n"
-            "用户本轮上传了以下附件。这里仅提供文件清单，不包含文件正文。\n"
-            "如果用户要求查看、总结、分析、比较附件内容，必须先调用 read_uploaded_file 读取对应文件。\n"
-            "read_uploaded_file 每次只能读取一个 file_id；如需查看多个文件，必须分多次调用。\n"
-            "不得在未读取文件内容前声称已经查看或分析了附件正文。\n\n"
+            "用户本轮上传了以下附件。这里仅提供文件清单、Outline 和预览，不包含文件正文。\n"
+            "如需查看、总结、分析附件内容，必须先调用 read_uploaded_file。\n"
+            "如需在多个附件或长文档中定位关键词，使用 search_uploaded_files，再按返回行号精读。\n"
+            "read_uploaded_file 每次只能读取一个 file_id；长文档必须使用 start_line、end_line 分段读取。\n"
+            "不得在未读取文件内容前声称已经查看或分析附件正文。\n\n"
             f"{file_list_text}\n"
             "</uploaded_files>"
         )
         current_prompt = getattr(request.system_message, "content", "")
-        new_system = SystemMessage(content=f"{current_prompt}{inserted}")
-        return await handler(request.override(system_message=new_system))
+        return await handler(request.override(system_message=SystemMessage(content=f"{current_prompt}{inserted}")))

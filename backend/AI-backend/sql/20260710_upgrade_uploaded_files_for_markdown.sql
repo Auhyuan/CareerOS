@@ -1,9 +1,13 @@
--- 文件服务：上传文件记录表
--- 执行位置：career_ai 数据库
+-- 文件服务表重建脚本。
+-- 前提：agent.uploaded_files 当前没有需要保留的数据。
+-- 执行位置：career_ai 数据库。
+-- 本脚本会删除旧 uploaded_files 表并创建当前文件服务所需的干净结构。
 
-CREATE SCHEMA IF NOT EXISTS agent;
+BEGIN;
 
-CREATE TABLE IF NOT EXISTS agent.uploaded_files (
+DROP TABLE IF EXISTS agent.uploaded_files;
+
+CREATE TABLE agent.uploaded_files (
     file_id VARCHAR(100) PRIMARY KEY,
     original_name VARCHAR(500) NOT NULL,
     stored_name VARCHAR(255) NOT NULL,
@@ -27,13 +31,13 @@ CREATE TABLE IF NOT EXISTS agent.uploaded_files (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_uploaded_files_original_name
+CREATE INDEX idx_uploaded_files_original_name
 ON agent.uploaded_files(original_name);
 
-CREATE INDEX IF NOT EXISTS idx_uploaded_files_conversion_status
+CREATE INDEX idx_uploaded_files_conversion_status
 ON agent.uploaded_files(conversion_status);
 
-CREATE INDEX IF NOT EXISTS idx_uploaded_files_created_at
+CREATE INDEX idx_uploaded_files_created_at
 ON agent.uploaded_files(created_at);
 
 COMMENT ON TABLE agent.uploaded_files IS 'AI-backend 文件服务上传文件记录表';
@@ -47,10 +51,12 @@ COMMENT ON COLUMN agent.uploaded_files.size_bytes IS '文件大小，单位字�
 COMMENT ON COLUMN agent.uploaded_files.status IS '文件状态：uploaded=已上传，deleted=已删除等';
 COMMENT ON COLUMN agent.uploaded_files.content_path IS 'Agent 实际读取的内容源路径，可能是原文件或转换后的content.md';
 COMMENT ON COLUMN agent.uploaded_files.content_type IS '内容类型：pending=未处理，original_text=原始文本，markdown=转换后的Markdown，image=图片';
-COMMENT ON COLUMN agent.uploaded_files.conversion_status IS '转换状态：pending=待转换，processing=转换中，success=成功，failed=失败，not_required=无需转换';
+COMMENT ON COLUMN agent.uploaded_files.conversion_status IS '转换状态：pending=待处理，processing=处理中，success=成功，failed=失败，not_required=无需转换';
 COMMENT ON COLUMN agent.uploaded_files.conversion_error IS '最近一次内容转换失败原因';
 COMMENT ON COLUMN agent.uploaded_files.converter_name IS '最近一次使用的转换器，例如pymupdf4llm';
 COMMENT ON COLUMN agent.uploaded_files.converted_at IS '最近一次完成内容源构建的时间';
 COMMENT ON COLUMN agent.uploaded_files.metadata IS '扩展元数据';
 COMMENT ON COLUMN agent.uploaded_files.created_at IS '创建时间';
 COMMENT ON COLUMN agent.uploaded_files.updated_at IS '更新时间';
+
+COMMIT;

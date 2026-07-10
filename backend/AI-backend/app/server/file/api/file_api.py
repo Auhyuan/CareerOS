@@ -28,28 +28,24 @@ def file_health():
 
 
 @router.post("/upload", response_model=Result[FileUploadResponse], summary="上传文件")
-def upload_files(files: list[UploadFile] = File(...), db: Session = Depends(get_postgres_engine)):
-    """上传文件并返回文件 ID。"""
-    result = file_service.upload_files(db, files)
-    return Result.success(result)
+async def upload_files(files: list[UploadFile] = File(...), db: Session = Depends(get_postgres_engine)):
+    """上传文件，并在响应返回前同步完成内容源构建。"""
+    return Result.success(await file_service.upload_files(db, files))
 
 
 @router.post("/detail", response_model=Result[UploadedFileView], summary="查询文件详情")
 def get_file_detail(request: FileDetailRequest, db: Session = Depends(get_postgres_engine)):
     """根据文件 ID 查询文件详情。"""
-    result = file_service.get_file(db, request.file_id)
-    return Result.success(result)
+    return Result.success(file_service.get_file(db, request.file_id))
 
 
-@router.post("/parse", response_model=Result[FileParseResponse], summary="解析文件内容")
+@router.post("/parse", response_model=Result[FileParseResponse], summary="构建文件内容源")
 async def parse_file(request: FileParseRequest, db: Session = Depends(get_postgres_engine)):
-    """根据文件 ID 解析文件文本内容。"""
-    result = await file_service.parse_file(db, request.file_id, request.parse_mode, request.force)
-    return Result.success(result)
+    """根据文件 ID 构建可读内容源，并返回解析文本和 Outline。"""
+    return Result.success(await file_service.parse_file(db, request.file_id, request.force))
 
 
 @router.post("/delete", response_model=Result[FileDeleteResponse], summary="删除文件")
 def delete_files(request: FileDeleteRequest, db: Session = Depends(get_postgres_engine)):
-    """删除文件记录和磁盘文件。"""
-    result = file_service.delete_files(db, request.file_ids)
-    return Result.success(result)
+    """删除文件记录和 file_id 独立目录。"""
+    return Result.success(file_service.delete_files(db, request.file_ids))

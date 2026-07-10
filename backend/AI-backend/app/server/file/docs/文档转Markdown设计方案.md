@@ -86,10 +86,9 @@ data/uploads/{file_id}/
 | `conversion_status` | `pending`、`processing`、`success`、`failed`、`not_required` |
 | `conversion_error` | 转换失败原因 |
 | `converter_name` | 使用的转换器，例如 `markitdown` |
-| `outline` | JSONB，保存标题、层级、起始行号等 |
 | `converted_at` | 最近一次成功转换时间 |
 
-第一版可以继续缓存解析后的 Markdown 文本，但长期应以磁盘中的内容源文件为主，数据库保存状态、路径和 Outline，避免大文档正文长期占用数据库字段。
+第一版以磁盘中的内容源文件为主，数据库只保存状态、路径和转换器信息。Outline 是 Agent Run 内的临时文件地图，不落库。
 
 ## 6. Outline 抽取
 
@@ -181,3 +180,42 @@ Outline 是附件的内容地图，用于帮助 Agent 决定要读取哪个范�
 - 增加会话与附件关联，使后续消息可自动复用已上传文件。
 - 增加文件上传数量、单文件大小和单次总大小限制。
 - 增加转换任务的异步队列与前端状态展示。
+
+
+## 11. 当前实现状态
+
+当前版本已实现以下内容：
+
+- 上传文件按 `data/uploads/{file_id}/original.xxx` 保存。
+- PDF 首次被文件服务使用时，通过 `pymupdf4llm` 懒转换为同目录 `content.md`。
+- 纯文本、代码、结构化文本不转换，原文件直接作为内容源。
+- 图片不转换，也不会伪造文本内容。
+- 内容源会抽取标准 Markdown 标题 Outline；无标题时保存前 5 行非空预览。
+- Agent 上下文只注入文件清单与 Outline。
+- `read_uploaded_file` 支持 `file_id`、`start_line`、`end_line`，一次只读取一个白名单文件。
+- 工具输出默认最多读取 200 行，并对超长内容进行字符截断保护。
+
+当前未实现 Word、Excel、PowerPoint 转换和图片视觉识别，后续可在现有内容源构建流程中扩展。
+
+
+## 12. OCR 预留设计
+
+当前版本没有启用 OCR。
+
+- PDF 使用 `pymupdf4llm.to_markdown(..., use_ocr=False)`，不会隐式调用本地 OCR。
+- 图片不会转换为文本，Outline 会标记 `ocr_status=not_enabled`。
+- 扫描型 PDF 未提取到文本时，会明确提示 OCR 尚未启用。
+- [ocr_service.py](../src/ocr/ocr_service.py) 是未来 MinerU 的唯一接入位置。
+- 后续 MinerU 接入只需要实现 `OcrService.is_available()` 和 `OcrService.recognize_to_markdown()`，解析器、Agent 工具和数据库结构不需要感知具体提供方。
+
+
+## 13. 同步转换与懒加载 Outline
+
+文件上传接口负责保存原文件，并在同一个 HTTP 请求内完成内容源构建。
+
+- POST /file/upload 在返回 file_id 前同步生成 content.md 或确认原文件可直接读取。
+- PDF 转 Markdown 通过 asyncio.to_thread 放在线程池执行，事件循环不会被阻塞，但转换仍属于上传请求。
+- 上传接口限制单次最多 10 个文件、单文件最大 50MB、单次总大小最大 100MB。
+- FileContextMiddleware 在本次 Agent Run 的首次模型调用时，从内容源临时抽取 Outline 或前 5 行预览。
+- 中间件会缓存本次运行的附件地图，后续工具调用后的模型轮次复用同一份 Outline。
+- Outline 不写入 PostgreSQL；POST /file/parse 仅作为人工重试和调试入口。

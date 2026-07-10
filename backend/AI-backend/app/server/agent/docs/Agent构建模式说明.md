@@ -27,7 +27,7 @@
   "system_prompt": "可选系统提示词",
   "response_format": null,
   "inputs": {},
-  "files": [],
+  "file_ids": [],
   "tools": [],
   "optional_features": {
     "long_term_memory_enabled": false
@@ -49,7 +49,7 @@
 - `system_prompt` 控制本次 Agent 的系统提示词。
 - `response_format` 接收可选 JSON Schema，非空时启用 LangChain 结构化输出。
 - `inputs` 是业务变量，供 prompt、工具、中间件读取。
-- `files` 是附件上下文。
+- `file_ids` 是附件上下文。
 - `tools` 是本次允许加载的 MCP 外接工具编码白名单；A2A、规划等内置工具不允许写在这里。
 - `optional_features` 是本次运行的能力开关。
 - `runtime_options` 是模型运行参数。
@@ -144,7 +144,7 @@ query
 sys_var
 user_var
 inputs
-files
+file_ids
 allowed_tools
 optional_features
 memory_enabled
@@ -297,7 +297,7 @@ query
 sys_var
 user_var
 inputs
-files
+file_ids
 allowed_tools
 optional_features
 memory_enabled
