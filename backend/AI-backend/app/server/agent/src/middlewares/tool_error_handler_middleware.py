@@ -9,6 +9,7 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from app.server.agent.src.config import get_agent_runtime_settings
 from app.server.agent.src.graph.state import CareerAgentState
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ class ToolErrorHandlerMiddleware(AgentMiddleware[CareerAgentState]):
 
     state_schema = CareerAgentState
 
-    def __init__(self, enabled: bool = True, max_error_length: int = 500):
+    def __init__(self, enabled: bool = True, max_error_length: int | None = None):
         """初始化工具异常处理中间件。
 
         Args:
@@ -27,7 +28,9 @@ class ToolErrorHandlerMiddleware(AgentMiddleware[CareerAgentState]):
             max_error_length: 错误信息最大长度，超过则截断。
         """
         self.enabled = enabled
-        self.max_error_length = max_error_length
+        self.max_error_length = (
+            max_error_length or get_agent_runtime_settings().tool_error_max_length
+        )
 
     def _build_error_message(self, request: ToolCallRequest, error: Exception) -> ToolMessage:
         """根据工具异常构造错误 ToolMessage。"""

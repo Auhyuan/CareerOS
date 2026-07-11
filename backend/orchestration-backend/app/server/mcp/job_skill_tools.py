@@ -16,8 +16,9 @@ def register_job_skill_tools(mcp: Any) -> None:
     @mcp.tool(
         name="search_job_skills",
         description=(
-            "根据多个关键词批量查询平台已有岗位技能。"
-            "创建新技能前应先调用该工具，返回结果会按关键词分组，并包含候选技能 ID。"
+            "根据多个关键词一次性批量查询平台已有岗位技能。"
+            "应先汇总并去重全部技能后再调用，返回结果按关键词分组。"
+            "items 只是候选，调用方必须判断是否为同一技能；确认复用后使用候选项的 id 和标准 name。"
         ),
     )
     async def search_job_skills(keywords: list[str], limit_per_keyword: int = 10) -> dict[str, Any]:
@@ -38,9 +39,9 @@ def register_job_skill_tools(mcp: Any) -> None:
     @mcp.tool(
         name="create_job_skills",
         description=(
-            "当 search_job_skills 没有找到语义相同的技能时，批量创建新的平台岗位技能。"
-            "参数 skills 是数组，每一项包含 name 和 description。"
-            "如果标准化名称已存在，会复用已有技能，并在 results 中返回 created=false。"
+            "为 search_job_skills 未找到语义相同候选项的技能一次性批量创建平台技能。"
+            "参数 skills 是数组，每项必须包含 name 和 description；不要把已确认可复用的技能再次创建。"
+            "标准化名称已存在时会复用已有技能，调用方必须从 results 中读取 skill.id、skill.name 和 created。"
         ),
     )
     async def create_job_skills(skills: list[dict[str, str]]) -> dict[str, Any]:

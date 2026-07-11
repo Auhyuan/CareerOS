@@ -13,6 +13,7 @@ from app.server.agent.src.runtime import AgentRuntimeContext
 from app.server.agent.src.runs import AgentRunService
 from app.server.agent.src.schemas.request import AgentA2AConfig, AgentOptionalFeatures, AgentResumeRequest, AgentRunRequest, ModelRuntimeOptions
 from app.server.agent.src.schemas.response import AgentRunResponse
+from app.server.agent.src.config import get_agent_runtime_settings
 
 logger = logging.getLogger("ai_backend.agent.resume")
 
@@ -219,7 +220,10 @@ class AgentResumeService:
         try:
             result = await assembly.agent.ainvoke(
                 Command(resume=request.resume_value),
-                config={"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50},
+                config={
+                    "configurable": {"thread_id": context.thread_id},
+                    "recursion_limit": get_agent_runtime_settings().recursion_limit,
+                },
                 context=context.to_langchain_context(),
             )
         except Exception as error:
@@ -275,7 +279,10 @@ class AgentResumeService:
             last_task_plan_signature: str | None = None
             async for stream_chunk in assembly.agent.astream(
                 Command(resume=request.resume_value),
-                config={"configurable": {"thread_id": context.thread_id}, "recursion_limit": 50},
+                config={
+                    "configurable": {"thread_id": context.thread_id},
+                    "recursion_limit": get_agent_runtime_settings().recursion_limit,
+                },
                 context=context.to_langchain_context(),
                 stream_mode=["messages", "updates", "custom"],
             ):

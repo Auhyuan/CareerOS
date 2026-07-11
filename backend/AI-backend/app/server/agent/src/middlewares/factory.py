@@ -13,6 +13,7 @@ from app.server.agent.src.middlewares.tool_error_handler_middleware import ToolE
 from app.server.agent.src.middlewares.tool_logging_middleware import ToolLoggingMiddleware
 from app.server.agent.src.schemas.context_summarization import ContextSummarizationConfig
 from app.server.agent.src.schemas.config import AgentFeatureConfig
+from app.server.agent.src.config import get_agent_runtime_settings
 
 
 class MiddlewareFactory:
@@ -41,7 +42,11 @@ class MiddlewareFactory:
         middlewares.append(SingleToolCallMiddleware())
 
         # 基础能力：工具异常处理。始终开启，避免普通工具报错直接打断整个 Agent 流程。
-        middlewares.append(ToolErrorHandlerMiddleware())
+        middlewares.append(
+            ToolErrorHandlerMiddleware(
+                max_error_length=get_agent_runtime_settings().tool_error_max_length
+            )
+        )
 
         # 基础能力：工具参数注入。默认开启，只有工具声明注入参数时才真正生效。
         middlewares.append(ToolArgsInjectMiddleware())

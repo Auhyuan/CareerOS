@@ -433,6 +433,8 @@ class JobProfileService:
         return {
             "message": query,
             "message_type": "text",
+            # 服务间调用需要一次性 JSON 响应；SSE 仅供前端实时展示使用。
+            "stream": False,
             "payload": {},
             "system_prompt": template_config["system_prompt"],
             "inputs": trusted_inputs,

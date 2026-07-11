@@ -98,7 +98,7 @@ class RequiredSkill(BaseModel):
     skill_id: int = Field(gt=0, description="平台 job_skills 表中的技能 ID")
     name: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=100)
-    level: int = Field(default=0, ge=0, description="技能等级：0=未明确，1=了解，2=熟悉，3=掌握，4=精通")
+    level: int = Field(default=0, ge=0, le=4, description="技能等级：0=未明确，1=了解，2=熟悉，3=掌握，4=精通")
     requirement: str | None = Field(default=None, description="根据岗位原文提炼的具体技能要求")
     knowledge_points: list[str] = Field(default_factory=list, max_length=20)
     tools: list[str] = Field(default_factory=list, max_length=20)
@@ -112,7 +112,7 @@ class PreferredSkill(BaseModel):
     skill_id: int = Field(gt=0, description="平台 job_skills 表中的技能 ID")
     name: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=100)
-    level: int = Field(default=0, ge=0, description="技能等级：0=未明确，1=了解，2=熟悉，3=掌握，4=精通")
+    level: int = Field(default=0, ge=0, le=4, description="技能等级：0=未明确，1=了解，2=熟悉，3=掌握，4=精通")
     requirement: str | None = Field(default=None, description="根据岗位原文提炼的具体技能要求")
     tools: list[str] = Field(default_factory=list, max_length=20)
 
@@ -125,11 +125,32 @@ class GeneratedJobProfile(BaseModel):
     job_name: str = Field(min_length=1, max_length=255)
     job_overview: str | None = None
     responsibilities: list[JobResponsibility] = Field(default_factory=list, max_length=15)
-    required_skills: list[RequiredSkill] = Field(default_factory=list, max_length=30)
+    required_skills: list[RequiredSkill] = Field(default_factory=list)
     preferred_skills: list[PreferredSkill] = Field(default_factory=list, max_length=20)
     education_requirement: str | None = None
     experience_requirement: str | None = None
     certificate_requirement: str | None = None
+
+    @field_validator(
+        "job_overview",
+        "education_requirement",
+        "experience_requirement",
+        "certificate_requirement",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: object) -> object:
+        """把模型输出的字符串空值转换为真正的 None。
+
+        Args:
+            value: Agent 传入的可选文本字段值。
+
+        Returns:
+            规范化后的字段值。
+        """
+        if isinstance(value, str) and value.strip().casefold() in {"none", "null"}:
+            return None
+        return value
 
     @field_validator("job_name")
     @classmethod

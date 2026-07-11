@@ -7,6 +7,8 @@ from langchain_core.messages.utils import get_buffer_string
 from langgraph.config import get_stream_writer
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
+from app.server.agent.src.config import get_agent_runtime_settings
+
 logger = logging.getLogger("ai_backend.agent.context_summary")
 
 
@@ -41,9 +43,9 @@ class ConversationSummarizationMiddleware(SummarizationMiddleware):
     def __init__(
         self,
         model: Any,
-        trigger: tuple[str, int] = ("tokens", 12000),
-        keep: tuple[str, int] = ("messages", 20),
-        trim_tokens_to_summarize: int = 4000,
+        trigger: tuple[str, int] | None = None,
+        keep: tuple[str, int] | None = None,
+        trim_tokens_to_summarize: int | None = None,
     ) -> None:
         """初始化会话总结中间件。
 
@@ -53,6 +55,11 @@ class ConversationSummarizationMiddleware(SummarizationMiddleware):
             keep: 总结后保留的近期消息数量。
             trim_tokens_to_summarize: 单次总结请求最多携带的 Token 数。
         """
+        settings = get_agent_runtime_settings()
+        effective_trigger = trigger or ("tokens", settings.context_summary_trigger_tokens)
+        effective_keep = keep or ("messages", settings.context_summary_keep_messages)
+        effective_trim_tokens = trim_tokens_to_summarize or settings.context_summary_trim_tokens
+
         # 总结调用使用同一模型配置，但增加标记，避免内部模型 Token 冒泡到用户 SSE。
         summary_model = model.with_config(
             tags=["nostream"],
@@ -60,10 +67,10 @@ class ConversationSummarizationMiddleware(SummarizationMiddleware):
         )
         super().__init__(
             model=summary_model,
-            trigger=trigger,
-            keep=keep,
+            trigger=effective_trigger,
+            keep=effective_keep,
             summary_prompt=CONVERSATION_SUMMARY_PROMPT,
-            trim_tokens_to_summarize=trim_tokens_to_summarize,
+            trim_tokens_to_summarize=effective_trim_tokens,
         )
 
     async def abefore_model(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:

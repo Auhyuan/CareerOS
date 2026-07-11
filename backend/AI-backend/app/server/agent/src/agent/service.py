@@ -17,6 +17,7 @@ from app.server.agent.src.runs import AgentRunService
 from app.server.agent.src.schemas.request import AgentResumeRequest, AgentRunRequest
 from app.server.agent.src.agent.tool_results import collect_tool_results
 from app.server.agent.src.schemas.response import AgentRunResponse
+from app.server.agent.src.config import get_agent_runtime_settings
 from app.server.agent.src.templates.service import AgentTemplateService
 from app.server.agent.src.agent.run_lifecycle import AgentRunLifecycleService
 from app.server.agent.src.tools import AgentToolService
@@ -177,7 +178,8 @@ class AgentService:
             raise
 
         # 第四步：提取最终回答和结构化输出。
-        answer = result["messages"][-1].content if result.get("messages") else ""
+        # 兼容普通字符串以及 [{"type": "text", "text": "..."}] 内容块。
+        answer = self._extract_answer_from_result(result)
 
         # AIMessage.tool_calls 记录模型实际发出的工具调用。
         # 统计该值可以区分“工具已装配但模型未选择调用”和“工具执行阶段发生异常”。
@@ -253,7 +255,7 @@ class AgentService:
 
         return {
             "configurable": {"thread_id": context.thread_id},
-            "recursion_limit": 50,
+            "recursion_limit": get_agent_runtime_settings().recursion_limit,
             "metadata": metadata,
         }
 
