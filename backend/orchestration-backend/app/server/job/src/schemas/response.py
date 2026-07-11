@@ -86,6 +86,13 @@ class JobMarketProfileListResponse(BaseModel):
     page_size: int = Field(description="每页数量")
 
 
+class JobProfileGenerateResponse(BaseModel):
+    """岗位画像 Agent 生成结果响应模型。"""
+
+    run_id: str = Field(description="Agent 本次运行 ID，用于运行记录追踪")
+    answer: str = Field(description="Agent 根据岗位画像保存结果生成的最终回复")
+
+
 class JobCrawlIngestResponse(BaseModel):
     """岗位采集并写入原始岗位池的编排响应模型。"""
 

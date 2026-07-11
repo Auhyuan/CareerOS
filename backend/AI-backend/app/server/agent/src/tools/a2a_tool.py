@@ -71,16 +71,19 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
 
     parent_conversation_id = None
     parent_run_id = None
+    parent_inputs: dict = {}
     parent_tool_call_id = getattr(runtime, "tool_call_id", None) if runtime is not None else None
     if runtime is not None:
         ctx = getattr(runtime, "context", None) or {}
         if isinstance(ctx, dict):
             parent_conversation_id = str(ctx.get("thread_id") or "") or None
             parent_run_id = str(ctx.get("run_id") or "") or None
+            parent_inputs = dict(ctx.get("inputs") or {})
         elif hasattr(ctx, "model_dump"):
             context_data = ctx.model_dump()
             parent_conversation_id = str(context_data.get("thread_id") or "") or None
             parent_run_id = str(context_data.get("run_id") or "") or None
+            parent_inputs = dict(context_data.get("inputs") or {})
 
     sub_run_id = uuid4().hex
     sub_started_at = time.perf_counter()
@@ -115,6 +118,8 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
         conversation_id=None,
         system_prompt=config.system_prompt,
         inputs={
+            # 可信业务 inputs 必须传递给子 Agent，供 ToolArgsInjectMiddleware 注入 MCP 工具参数。
+            **parent_inputs,
             "_stream_scope": "sub_agent",
             "_sub_run_id": sub_run_id,
             "_sub_agent_id": agent_id,

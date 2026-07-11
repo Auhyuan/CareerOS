@@ -1,9 +1,7 @@
-import json
 import logging
 import re
 from typing import Any
 
-from pydantic import ValidationError
 from sqlmodel import Session
 
 from app.common.core.exceptions import BusinessException
@@ -11,12 +9,15 @@ from app.server.job.src.config.job_config import JOB_DEFAULT_PAGE, JOB_DEFAULT_P
 from app.server.job.src.clients import AIBackendAgentClient
 from app.server.job.src.models.job_model import JobMarketProfile
 from app.server.job.src.repository.job_repository import JobRepository
+from app.server.job.src.repository.job_skill_repository import JobSkillRepository
 from app.server.job.src.schemas.job_profile import (
     GeneratedJobProfile,
     JobProfileBatchDeleteRequest,
     JobProfileBatchDeleteResponse,
     JobProfileGenerateRequest,
+    JobProfileSaveRequest,
 )
+from app.server.job.src.schemas.response import JobProfileGenerateResponse
 
 
 logger = logging.getLogger("orchestration.job.profile")
@@ -28,52 +29,52 @@ class JobProfileService:
     def __init__(
         self,
         repository: JobRepository | None = None,
+        skill_repository: JobSkillRepository | None = None,
         ai_backend_agent_client: AIBackendAgentClient | None = None,
     ):
         """
         初始化岗位画像服务。
         Args:
             repository: 岗位库数据访问对象。
+            skill_repository: 岗位技能数据访问对象，用于校验并回填标准技能名称。
             ai_backend_agent_client: 能力层通用 Agent 客户端。
         """
         self.repository = repository or JobRepository()
+        self.skill_repository = skill_repository or JobSkillRepository()
         self.ai_backend_agent_client = ai_backend_agent_client or AIBackendAgentClient()
 
-    def generate_profile(
-        self,
-        db: Session,
-        request: JobProfileGenerateRequest,
-    ) -> JobMarketProfile:
-        """
-        根据画像类型分发到对应的岗位画像生成路线。
+    def generate_profile(self, request: JobProfileGenerateRequest) -> JobProfileGenerateResponse:
+        """根据画像类型分发到对应的岗位画像生成路线。
+
         Args:
-            db: 数据库会话。
             request: 岗位画像统一生成请求。
+
         Returns:
-            已保存的岗位画像。
+            Agent 运行 ID 和最终回复。
+
         Raises:
-            BusinessException: 对应画像生成路线未开放或生成失败。
+            BusinessException: 对应画像生成路线未开放或 Agent 执行失败。
         """
         if request.profile_type == "user":
-            return self._generate_user_profile(db, request)
-
-        return self._generate_system_profile(db, request)
+            return self._generate_user_profile(request)
+        return self._generate_system_profile(request)
 
     def _generate_user_profile(
         self,
-        db: Session,
         request: JobProfileGenerateRequest,
-    ) -> JobMarketProfile:
-        """
-        根据用户提交的岗位文本生成并保存用户岗位画像。
+    ) -> JobProfileGenerateResponse:
+        """调用岗位画像 Agent，由 Agent 通过工具保存用户岗位画像。
+
+        profile_type 和 user_id 会作为可信运行上下文传给 Agent，并由工具参数
+        注入中间件写入 save_job_profile。生成接口只返回 Agent 最终回复。
+
         Args:
-            db: 数据库会话。
             request: 岗位画像统一生成请求。
+
         Returns:
-            已保存的用户岗位画像。
+            Agent 运行 ID 和最终回复。
         """
         self._validate_user_route_request(request)
-
         if request.use_system_job_data:
             raise BusinessException(code=400, msg="参考系统岗位数据功能暂未开放")
 
@@ -88,38 +89,84 @@ class JobProfileService:
             len(cleaned_job_text),
         )
 
-        # 同一次生成只读取一次模板，首次生成和修复阶段复用同一份 Agent 配置。
+        # 模板决定提示词、模型和工具；请求只提供岗位材料与可信业务参数。
         template_config = self._load_profile_agent_config(request.agent_id)
-        agent_result = self._call_profile_agent(cleaned_job_text, template_config)
+        agent_result = self._call_profile_agent(
+            cleaned_job_text,
+            template_config,
+            profile_type=request.profile_type,
+            user_id=request.user_id,
+        )
+        run_id = agent_result.get("run_id")
+        answer = agent_result.get("answer")
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise BusinessException(code=502, msg="岗位画像 Agent 未返回运行 ID")
+        if not isinstance(answer, str) or not answer.strip():
+            raise BusinessException(code=502, msg="岗位画像 Agent 未返回最终回复")
 
+        # 自然语言可能误报成功，必须以真实 save_job_profile ToolMessage 为准。
+        save_result = self._extract_save_profile_result(agent_result)
+        profile_id = save_result.get("profile_id")
+        if save_result.get("saved") is not True or not isinstance(profile_id, int):
+            raise BusinessException(code=502, msg="岗位画像 Agent 未成功保存岗位画像")
+
+        logger.info(
+            "Job profile agent finished: run_id=%s profile_id=%s user_id=%s",
+            run_id,
+            profile_id,
+            request.user_id,
+        )
+        return JobProfileGenerateResponse(run_id=run_id, answer=answer)
+
+    def _extract_save_profile_result(self, agent_result: dict[str, Any]) -> dict[str, Any]:
+        """从 Agent 实际工具结果中提取岗位画像保存结果。
+
+        Args:
+            agent_result: AI-backend 返回的 Agent 运行结果。
+
+        Returns:
+            save_job_profile 的结构化执行结果。
+
+        Raises:
+            BusinessException: Agent 没有执行保存工具或工具结果格式异常。
+        """
+        tool_results = agent_result.get("tool_results")
+        if not isinstance(tool_results, list):
+            raise BusinessException(code=502, msg="岗位画像 Agent 未返回工具执行记录")
+
+        save_results = [
+            item.get("content")
+            for item in tool_results
+            if isinstance(item, dict) and item.get("tool_name") == "save_job_profile"
+        ]
+        if not save_results:
+            raise BusinessException(code=502, msg="岗位画像 Agent 未调用 save_job_profile")
+
+        # 若模型因参数修复多次调用保存工具，以最后一次真实执行结果作为最终状态。
+        final_result = save_results[-1]
+        if not isinstance(final_result, dict):
+            raise BusinessException(code=502, msg="save_job_profile 返回格式异常")
+        return final_result
+
+    def save_profile(self, db: Session, request: JobProfileSaveRequest) -> JobMarketProfile:
+        """校验 Agent 提交的岗位画像并保存到数据库。
+
+        Args:
+            db: 数据库会话。
+            request: 画像类型、用户归属和完整岗位画像内容。
+
+        Returns:
+            已写入数据库的岗位画像。
+
+        Raises:
+            BusinessException: 技能 ID 不存在或画像业务规则不满足。
+        """
+        generated_profile = request.profile.model_copy(deep=True)
+        self._canonicalize_profile_skills(db, generated_profile)
         try:
-            generated_profile = self._validate_generated_profile(agent_result)
-        except (ValueError, ValidationError) as first_error:
-            logger.warning(
-                "Job profile first validation failed, attempting one repair: user_id=%s error=%s",
-                request.user_id,
-                first_error,
-            )
-            # Agent 可能返回带代码围栏的内容、缺少字段或类型不匹配。
-            # 第一版只允许修复一次，避免无限调用模型并产生不可控成本。
-            repaired_result = self._repair_agent_output(
-                cleaned_job_text=cleaned_job_text,
-                agent_result=agent_result,
-                validation_error=str(first_error),
-                template_config=template_config,
-            )
-            try:
-                generated_profile = self._validate_generated_profile(repaired_result)
-            except (ValueError, ValidationError) as second_error:
-                logger.error(
-                    "Job profile validation failed after repair: user_id=%s error=%s",
-                    request.user_id,
-                    second_error,
-                )
-                raise BusinessException(
-                    code=422,
-                    msg=f"岗位画像生成结果格式不正确: {second_error}",
-                ) from second_error
+            self._validate_profile_business_rules(generated_profile)
+        except ValueError as error:
+            raise BusinessException(code=422, msg=str(error)) from error
 
         profile = JobMarketProfile(
             user_id=request.user_id,
@@ -133,35 +180,51 @@ class JobProfileService:
             experience_requirement=generated_profile.experience_requirement,
             certificate_requirement=generated_profile.certificate_requirement,
         )
-        logger.info(
-            "Job profile validation passed, persisting: user_id=%s job_name=%s required_skills=%d "
-            "preferred_skills=%d",
-            request.user_id,
-            generated_profile.job_name,
-            len(generated_profile.required_skills),
-            len(generated_profile.preferred_skills),
-        )
         saved_profile = self.repository.create_profile(profile, db)
         logger.info(
-            "Job profile persisted: profile_id=%s user_id=%s job_name=%s",
+            "Agent tool persisted job profile: profile_id=%s profile_type=%s user_id=%s job_name=%s",
             saved_profile.id,
+            saved_profile.profile_type,
             saved_profile.user_id,
             saved_profile.job_name,
         )
         return saved_profile
 
+    def _canonicalize_profile_skills(self, db: Session, profile: GeneratedJobProfile) -> None:
+        """校验技能 ID，并使用技能库中的标准名称覆盖模型生成名称。
+
+        Args:
+            db: 数据库会话。
+            profile: 待保存的岗位画像，方法会原地回填标准技能名称。
+
+        Raises:
+            BusinessException: 任一技能 ID 在 job_skills 表中不存在。
+        """
+        all_skills = [*profile.required_skills, *profile.preferred_skills]
+        skill_ids = list(dict.fromkeys(item.skill_id for item in all_skills))
+        persisted_skills = self.skill_repository.list_by_ids(db, skill_ids)
+        skill_name_by_id = {skill.id: skill.name for skill in persisted_skills if skill.id is not None}
+        missing_ids = [skill_id for skill_id in skill_ids if skill_id not in skill_name_by_id]
+        if missing_ids:
+            raise BusinessException(
+                code=422,
+                msg="岗位画像包含不存在的技能 ID: " + ", ".join(map(str, missing_ids)),
+            )
+
+        # 名称以平台技能库为准，避免模型传入同一 skill_id 却使用不同名称。
+        for item in all_skills:
+            item.name = skill_name_by_id[item.skill_id]
+
     def _generate_system_profile(
         self,
-        db: Session,
         request: JobProfileGenerateRequest,
-    ) -> JobMarketProfile:
+    ) -> JobProfileGenerateResponse:
         """
         处理系统岗位画像生成路线。
         Args:
-            db: 数据库会话；系统路线实现后用于读取岗位数据和保存画像。
             request: 岗位画像统一生成请求。
         Returns:
-            已保存的系统岗位画像。
+            Agent 运行 ID 和最终回复。
         Raises:
             BusinessException: 系统岗位画像生成路线当前尚未开放。
         """
@@ -325,54 +388,27 @@ class JobProfileService:
         self,
         cleaned_job_text: str,
         template_config: dict[str, Any],
+        *,
+        profile_type: str,
+        user_id: str | None,
     ) -> dict[str, Any]:
-        """
-        使用岗位画像 Agent 模板调用能力层通用 Agent。
+        """使用岗位画像 Agent 模板调用能力层通用 Agent。
 
         Args:
             cleaned_job_text: 清理后的岗位文本。
             template_config: 从能力层模板服务读取的 Agent 配置。
+            profile_type: 由业务接口校验后的画像类型。
+            user_id: 由业务接口校验后的用户 ID。
 
         Returns:
             能力层 Agent 运行结果。
         """
-        # 固定执行规则由 Agent 模板的 system_prompt 管理；query 只携带本次任务材料。
-        query = f"请根据以下岗位材料生成岗位画像：\n\n{cleaned_job_text}"
-        payload = self._build_agent_run_payload(query, template_config)
-        return self._run_profile_agent(payload)
-
-    def _repair_agent_output(
-        self,
-        *,
-        cleaned_job_text: str,
-        agent_result: dict[str, Any],
-        validation_error: str,
-        template_config: dict[str, Any],
-    ) -> dict[str, Any]:
-        """
-        使用同一 Agent 模板请求模型修复一次岗位画像输出。
-
-        Args:
-            cleaned_job_text: 原始岗位材料。
-            agent_result: 第一次 Agent 运行结果。
-            validation_error: 第一次输出的校验错误。
-            template_config: 首次生成时加载的 Agent 模板配置。
-
-        Returns:
-            修复后的 Agent 运行结果。
-        """
-        original_output = agent_result.get("answer") or ""
-        query = (
-            "请修复下面的岗位画像输出，使其严格符合 约定的 JSON 定义的结构。"
-            "只能根据原始岗位材料修复，不得补充新事实。\n\n"
-            f"原始岗位材料：\n{cleaned_job_text}\n\n"
-            f"待修复输出：\n{original_output}\n\n"
-            f"校验错误：\n{validation_error}"
-        )
+        # 固定规则由模板 system_prompt 管理；消息只携带本次岗位材料。
+        query = f"请根据以下岗位材料生成并保存岗位画像：\n\n{cleaned_job_text}"
         payload = self._build_agent_run_payload(
             query,
             template_config,
-            runtime_overrides={"temperature": 0, "max_retries": 1},
+            trusted_inputs={"profile_type": profile_type, "user_id": user_id},
         )
         return self._run_profile_agent(payload)
 
@@ -381,34 +417,29 @@ class JobProfileService:
         query: str,
         template_config: dict[str, Any],
         *,
-        runtime_overrides: dict[str, Any] | None = None,
+        trusted_inputs: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        将 Agent 模板配置展开为 /agent/messages 请求参数。
+        """将 Agent 模板配置展开为 /agent/messages 请求参数。
 
         Args:
             query: 本次岗位画像任务指令。
             template_config: Agent 模板 config。
-            runtime_overrides: 本次调用需要覆盖的模型运行参数。
+            trusted_inputs: 由编排层校验后传给工具注入中间件的业务参数。
 
         Returns:
             可直接提交给能力层 /agent/messages 的请求体。
         """
-        runtime_options = dict(template_config.get("runtime_options") or {})
-        if runtime_overrides:
-            runtime_options.update(runtime_overrides)
-
-        # message 是每次业务调用产生的动态内容，其余装配参数全部来源于 Agent 模板。
+        # profile_type/user_id 不作为模型可填写的工具参数，而由 Runtime Context 注入。
         return {
             "message": query,
             "message_type": "text",
             "payload": {},
             "system_prompt": template_config["system_prompt"],
-            "inputs": {},
+            "inputs": trusted_inputs,
             "files": [],
             "tools": list(template_config.get("tools") or []),
             "optional_features": dict(template_config.get("optional_features") or {}),
-            "runtime_options": runtime_options,
+            "runtime_options": dict(template_config.get("runtime_options") or {}),
         }
 
     def _run_profile_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -428,71 +459,6 @@ class JobProfileService:
             return self.ai_backend_agent_client.run_agent(payload)
         except RuntimeError as error:
             raise BusinessException(code=502, msg=str(error)) from error
-
-    def _validate_agent_result(self, agent_result: dict[str, Any]) -> GeneratedJobProfile:
-        """
-        提取并校验能力层 Agent 返回的岗位画像。
-        Args:
-            agent_result: 能力层 Agent 运行结果。
-        Returns:
-            通过 Pydantic 校验的岗位画像。
-        Raises:
-            ValueError: 响应中不存在可解析的 JSON。
-            ValidationError: JSON 不符合岗位画像 Schema。
-        """
-        # Agent 已不再使用 LangChain 结构化输出，这里直接从 answer 文本中解析岗位画像 JSON。
-        answer = agent_result.get("answer")
-        if not isinstance(answer, str) or not answer.strip():
-            raise ValueError("Agent did not return job profile content")
-        profile_data = self._extract_json_object(answer)
-
-        return GeneratedJobProfile.model_validate(profile_data)
-
-    def _validate_generated_profile(self, agent_result: dict[str, Any]) -> GeneratedJobProfile:
-        """
-        完成岗位画像结构校验和跨字段业务规则校验。
-        Args:
-            agent_result: 能力层 Agent 运行结果。
-        Returns:
-            完整通过校验的岗位画像。
-        Raises:
-            ValueError: JSON 提取失败或业务规则不满足。
-            ValidationError: JSON 不符合岗位画像 Schema。
-        """
-        profile = self._validate_agent_result(agent_result)
-        self._validate_profile_business_rules(profile)
-        return profile
-
-    def _extract_json_object(self, answer: str) -> dict[str, Any]:
-        """
-        从 Agent 文本回答中提取 JSON 对象。
-        Args:
-            answer: Agent 返回的文本。
-        Returns:
-            解析后的 JSON 字典。
-        Raises:
-            ValueError: 文本中不存在合法 JSON 对象。
-        """
-        cleaned_answer = answer.strip()
-        fence_match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", cleaned_answer, flags=re.DOTALL | re.IGNORECASE)
-        if fence_match:
-            cleaned_answer = fence_match.group(1).strip()
-
-        try:
-            parsed = json.loads(cleaned_answer)
-        except json.JSONDecodeError:
-            start_index = cleaned_answer.find("{")
-            end_index = cleaned_answer.rfind("}")
-            if start_index < 0 or end_index <= start_index:
-                raise ValueError("Agent 输出中未找到 JSON 对象")
-            try:
-                parsed = json.loads(cleaned_answer[start_index : end_index + 1])
-            except json.JSONDecodeError as error:
-                raise ValueError(f"Agent 输出 JSON 解析失败: {error.msg}") from error
-
-        if not isinstance(parsed, dict):
-            raise ValueError("Agent 输出必须是 JSON 对象")
-        return parsed
 
     def _validate_profile_business_rules(self, profile: GeneratedJobProfile) -> None:
         """

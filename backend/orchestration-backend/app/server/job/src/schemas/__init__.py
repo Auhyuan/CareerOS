@@ -17,6 +17,7 @@ from app.server.job.src.schemas.response import (
     JobDirectionResponse,
     JobMarketProfileListResponse,
     JobMarketProfileResponse,
+    JobProfileGenerateResponse,
     JobRawRecordListResponse,
     JobRawRecordResponse,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "JobDirectionListResponse",
     "JobMarketProfileResponse",
     "JobMarketProfileListResponse",
+    "JobProfileGenerateResponse",
     "JobRawRecordResponse",
     "JobRawRecordListResponse",
 ]

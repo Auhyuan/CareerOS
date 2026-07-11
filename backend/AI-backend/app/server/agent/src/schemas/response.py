@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.server.agent.src.tools.schemas import AgentToolInfo
@@ -31,3 +33,4 @@ class AgentRunResponse(BaseModel):
 
     run_id: str = Field(default="", description="Agent 本次运行 ID")
     answer: str = Field(default="", description="Agent 输出文本")
+    tool_results: list[dict[str, Any]] = Field(default_factory=list, description="本次实际完成的工具执行结果")

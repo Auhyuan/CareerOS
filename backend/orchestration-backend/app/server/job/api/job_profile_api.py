@@ -10,7 +10,11 @@ from app.server.job.src.schemas.job_profile import (
     JobProfileGenerateRequest,
     UserJobProfileSearchRequest,
 )
-from app.server.job.src.schemas.response import JobMarketProfileListResponse, JobMarketProfileResponse
+from app.server.job.src.schemas.response import (
+    JobMarketProfileListResponse,
+    JobMarketProfileResponse,
+    JobProfileGenerateResponse,
+)
 from app.server.job.src.service import JobProfileService
 
 
@@ -18,21 +22,21 @@ router = APIRouter(prefix="/profiles")
 job_profile_service = JobProfileService()
 
 
-@router.post("/generate", response_model=Result[JobMarketProfileResponse], summary="生成岗位画像")
-def generate_job_profile(
-    request: JobProfileGenerateRequest,
-    db: Session = Depends(get_postgres_engine),
-):
-    """
-    根据画像类型生成并保存岗位画像。
+@router.post("/generate", response_model=Result[JobProfileGenerateResponse], summary="生成岗位画像")
+def generate_job_profile(request: JobProfileGenerateRequest):
+    """调用岗位画像 Agent 生成并保存岗位画像。
+
+    岗位画像由 Agent 在执行过程中调用 save_job_profile 工具写入数据库。
+    本接口不再解析 Agent JSON，也不会执行第二次入库。
+
     Args:
         request: 岗位画像类型及对应生成路线参数。
-        db: 数据库会话。
+
     Returns:
-        已保存的岗位画像。
+        Agent 运行 ID 和最终回复。
     """
-    profile = job_profile_service.generate_profile(db, request)
-    return Result.success(profile)
+    result = job_profile_service.generate_profile(request)
+    return Result.success(result)
 
 
 @router.post("/search", response_model=Result[JobMarketProfileListResponse], summary="根据用户 ID 查询岗位画像列表")

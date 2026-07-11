@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class JobProfileGenerateRequest(BaseModel):
@@ -145,6 +145,33 @@ class GeneratedJobProfile(BaseModel):
         if not cleaned_value:
             raise ValueError("job_name 不能为空")
         return cleaned_value
+
+
+class JobProfileSaveRequest(BaseModel):
+    """保存岗位画像工具的业务请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_type: Literal["user", "system"] = Field(description="画像类型：user 或 system")
+    user_id: str | None = Field(default=None, max_length=100, description="用户 ID；user 类型必填")
+    profile: GeneratedJobProfile = Field(description="经过 Agent 提炼的岗位画像内容")
+
+    @field_validator("user_id")
+    @classmethod
+    def strip_save_user_id(cls, value: str | None) -> str | None:
+        """清理可选用户 ID，纯空白值转换为 None。"""
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @model_validator(mode="after")
+    def validate_profile_owner(self) -> "JobProfileSaveRequest":
+        """校验画像类型和用户归属字段的组合关系。"""
+        if self.profile_type == "user" and not self.user_id:
+            raise ValueError("profile_type=user 时 user_id 不能为空")
+        if self.profile_type == "system" and self.user_id is not None:
+            raise ValueError("profile_type=system 时 user_id 必须为空")
+        return self
 
 
 class JobProfileBatchDeleteRequest(BaseModel):

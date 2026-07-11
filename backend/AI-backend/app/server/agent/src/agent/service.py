@@ -15,6 +15,7 @@ from app.server.agent.src.prompts import AgentPromptService
 from app.server.agent.src.runtime import AgentRuntimeContextService
 from app.server.agent.src.runs import AgentRunService
 from app.server.agent.src.schemas.request import AgentResumeRequest, AgentRunRequest
+from app.server.agent.src.agent.tool_results import collect_tool_results
 from app.server.agent.src.schemas.response import AgentRunResponse
 from app.server.agent.src.templates.service import AgentTemplateService
 from app.server.agent.src.agent.run_lifecycle import AgentRunLifecycleService
@@ -220,6 +221,8 @@ class AgentService:
         return AgentRunResponse(
             run_id=context.run_id,
             answer=answer,
+            # 这里只返回已经产生 ToolMessage 的真实执行结果，模型声明的 tool_calls 不算成功。
+            tool_results=collect_tool_results(list(result.get("messages") or [])),
         )
 
     def _build_langgraph_config(self, context) -> dict[str, Any]:

@@ -80,7 +80,7 @@ def get_agent_capabilities(db: Session = Depends(get_postgres_engine)):
                 "memory_placeholder",
                 "postgres_checkpointer",
                 "graph_state_schema",
-                "job_skill_http_tools",
+                "mcp_external_tools",
             ],
             registered_tools=[tool.name for tool in all_tools if tool.template_selectable],
             tools=all_tools,

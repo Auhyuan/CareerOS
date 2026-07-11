@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from app.server.mcp.config import MCPConfig, get_mcp_config
+from app.server.mcp.job_profile_tools import register_job_profile_tools
 from app.server.mcp.job_skill_tools import register_job_skill_tools
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,8 @@ def create_mcp_server(config: MCPConfig | None = None) -> Any | None:
 
     mcp = FastMCP(runtime_config.mcp_service_name)
     register_job_skill_tools(mcp)
-    logger.info("MCP 工具注册完成: names=['search_job_skills', 'create_job_skills']")
+    register_job_profile_tools(mcp)
+    logger.info("MCP 工具注册完成: names=['search_job_skills', 'create_job_skills', 'save_job_profile']")
     return mcp
 
 
