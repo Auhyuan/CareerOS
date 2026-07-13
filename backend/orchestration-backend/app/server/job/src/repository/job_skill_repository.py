@@ -1,8 +1,19 @@
-from sqlalchemy import case, func, or_
+from dataclasses import dataclass
+
+from sqlalchemy import case, false, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from app.server.job.src.models.job_skill_model import JobSkill
+
+
+@dataclass(frozen=True, slots=True)
+class JobSkillSearchMatch:
+    """岗位技能查询命中结果，保存技能、命中类型和匹配分数。"""
+
+    skill: JobSkill
+    match_type: str
+    match_score: int
 
 
 class JobSkillRepository:
@@ -57,9 +68,12 @@ class JobSkillRepository:
         keyword: str,
         normalized_keyword: str,
         limit: int,
-    ) -> list[JobSkill]:
+    ) -> list[JobSkillSearchMatch]:
         """
-        按精确名称、技能名称和描述模糊查询岗位技能。
+        按名称和描述分层评分查询岗位技能。
+
+        名称精确、前缀和包含命中依次降权，描述命中只用于扩大召回，
+        分数明显低于名称命中，避免描述相关候选被误判为同一个技能。
 
         Args:
             db: 数据库会话。
@@ -68,26 +82,87 @@ class JobSkillRepository:
             limit: 最大返回数量。
 
         Returns:
-            按精确匹配优先级排序的技能列表。
+            按匹配分数降序排列的技能候选。
         """
-        like_keyword = f"%{keyword}%"
+        escaped_keyword = self._escape_like_keyword(keyword)
+        escaped_normalized = self._escape_like_keyword(normalized_keyword)
+        name_prefix_pattern = f"{escaped_keyword}%"
+        name_contains_pattern = f"%{escaped_keyword}%"
+        normalized_prefix_pattern = f"{escaped_normalized}%"
+        normalized_contains_pattern = f"%{escaped_normalized}%"
+
+        # 每种候选只采用命中的最高等级评分。名称相关规则始终高于描述规则。
+        # 纯符号关键词标准化后可能为空，此时禁用 normalized_name 规则，避免 LIKE '%' 全表命中。
+        normalized_exact = JobSkill.normalized_name == normalized_keyword if normalized_keyword else false()
+        name_exact = col(JobSkill.name).ilike(escaped_keyword, escape="\\")
+        normalized_prefix = (
+            col(JobSkill.normalized_name).like(normalized_prefix_pattern, escape="\\")
+            if normalized_keyword
+            else false()
+        )
+        name_prefix = col(JobSkill.name).ilike(name_prefix_pattern, escape="\\")
+        normalized_contains = (
+            col(JobSkill.normalized_name).like(normalized_contains_pattern, escape="\\")
+            if normalized_keyword
+            else false()
+        )
+        name_contains = col(JobSkill.name).ilike(name_contains_pattern, escape="\\")
+        description_contains = col(JobSkill.description).ilike(name_contains_pattern, escape="\\")
+
+        match_score = case(
+            (normalized_exact, 100),
+            (name_exact, 95),
+            (normalized_prefix, 85),
+            (name_prefix, 80),
+            (normalized_contains, 75),
+            (name_contains, 70),
+            (description_contains, 20),
+            else_=0,
+        )
+        match_type = case(
+            (normalized_exact, "normalized_exact"),
+            (name_exact, "name_exact"),
+            (normalized_prefix, "normalized_prefix"),
+            (name_prefix, "name_prefix"),
+            (normalized_contains, "normalized_contains"),
+            (name_contains, "name_contains"),
+            (description_contains, "description_contains"),
+            else_="none",
+        )
+
         statement = (
-            select(JobSkill)
+            select(
+                JobSkill,
+                match_type.label("match_type"),
+                match_score.label("match_score"),
+            )
             .where(
                 or_(
-                    JobSkill.normalized_name == normalized_keyword,
-                    col(JobSkill.name).ilike(like_keyword),
-                    col(JobSkill.description).ilike(like_keyword),
+                    normalized_exact,
+                    name_exact,
+                    normalized_prefix,
+                    name_prefix,
+                    normalized_contains,
+                    name_contains,
+                    description_contains,
                 )
             )
             .order_by(
-                case((JobSkill.normalized_name == normalized_keyword, 0), else_=1),
+                match_score.desc(),
                 func.length(JobSkill.name),
                 JobSkill.name,
             )
             .limit(limit)
         )
-        return list(db.exec(statement).all())
+        rows = db.exec(statement).all()
+        return [
+            JobSkillSearchMatch(
+                skill=row[0],
+                match_type=str(row[1]),
+                match_score=int(row[2]),
+            )
+            for row in rows
+        ]
 
     def create_or_get(
         self,
@@ -130,3 +205,16 @@ class JobSkillRepository:
             if existing is not None:
                 return existing, False
             raise
+
+    @staticmethod
+    def _escape_like_keyword(value: str) -> str:
+        """
+        转义 SQL LIKE 模式中的特殊字符，避免关键词被当作通配表达式。
+
+        Args:
+            value: 原始或标准化后的查询关键词。
+
+        Returns:
+            可安全用于 LIKE / ILIKE 模式的关键词。
+        """
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

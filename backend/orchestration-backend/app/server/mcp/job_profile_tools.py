@@ -71,6 +71,8 @@ def register_job_profile_tools(mcp: Any) -> None:
             "profile_type 和 user_id 由系统运行上下文自动注入，模型不需要也不应该填写。"
             "调用前必须通过 search_job_skills/create_job_skills 获得每项技能的有效 skill_id 和标准 name。"
             "responsibilities、required_skills、preferred_skills 必须直接传原生 JSON 数组，禁止把数组序列化为字符串。"
+            "job_overview 必须在其他字段提炼完成后，综合 job_name、responsibilities、required_skills、"
+            "experience_requirement 和 preferred_skills 生成；不能只摘抄招聘原文中的一句话。"
             "正确示例：{\"job_name\":\"AI应用开发工程师\","
             "\"responsibilities\":[{\"name\":\"接口开发\",\"description\":\"开发AI应用接口\"}],"
             "\"required_skills\":[{\"skill_id\":66,\"name\":\"Python\",\"level\":3}],"
@@ -97,7 +99,7 @@ def register_job_profile_tools(mcp: Any) -> None:
             job_name: Agent 从岗位材料中提炼的岗位名称。
             profile_type: 系统从 Agent Runtime Context 自动注入，模型不需要填写。
             user_id: 系统从 Agent Runtime Context 自动注入，模型不需要填写。
-            job_overview: 岗位概述。
+            job_overview: 综合岗位名称、职责、必备技能、经验要求和加分技能生成的岗位概览。
             responsibilities: 岗位职责列表，每项包含 name 和 description。
             required_skills: 必备技能列表，每项必须包含有效 skill_id、name 和 level。
             preferred_skills: 加分技能列表，每项必须包含有效 skill_id、name 和 level。

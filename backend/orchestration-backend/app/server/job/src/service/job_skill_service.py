@@ -13,6 +13,7 @@ from app.server.job.src.schemas.job_skill import (
     JobSkillCreateResponse,
     JobSkillKeywordResult,
     JobSkillResponse,
+    JobSkillSearchItem,
     JobSkillSearchRequest,
     JobSkillSearchResponse,
 )
@@ -50,7 +51,14 @@ class JobSkillService:
                 normalized_keyword=normalized,
                 limit=request.limit_per_keyword,
             )
-            items = [JobSkillResponse.model_validate(row) for row in rows]
+            items = [
+                JobSkillSearchItem(
+                    **JobSkillResponse.model_validate(match.skill).model_dump(),
+                    match_type=match.match_type,
+                    match_score=match.match_score,
+                )
+                for match in rows
+            ]
             results.append(JobSkillKeywordResult(keyword=keyword, items=items, total=len(items)))
         return JobSkillSearchResponse(results=results)
 

@@ -9,7 +9,7 @@ class JobSkillSearchRequest(BaseModel):
     keywords: list[str] = Field(
         min_length=1, description="技能查询关键字列表"
     )
-    limit_per_keyword: int = Field(default=10, ge=1, le=20, description="每个关键字最大返回数量")
+    limit_per_keyword: int = Field(default=3, ge=1, le=20, description="每个关键字最大返回数量")
 
     @field_validator("keywords")
     @classmethod
@@ -58,12 +58,19 @@ class JobSkillResponse(BaseModel):
     updated_at: datetime
 
 
+class JobSkillSearchItem(JobSkillResponse):
+    """岗位技能查询候选项，包含本次关键词匹配依据和评分。"""
+
+    match_type: str = Field(description="匹配类型，用于说明候选项由哪个字段和规则命中")
+    match_score: int = Field(ge=0, le=100, description="匹配分数；名称命中的分数高于描述命中")
+
+
 class JobSkillKeywordResult(BaseModel):
     """单个关键字的查询结果。"""
 
     keyword: str = Field(description="查询关键字")
-    items: list[JobSkillResponse] = Field(default_factory=list, description="匹配技能列表")
-    total: int = Field(default=0, description="匹配数量")
+    items: list[JobSkillSearchItem] = Field(default_factory=list, description="按匹配分数降序排列的技能候选")
+    total: int = Field(default=0, description="本次返回的匹配数量")
 
 
 class JobSkillSearchResponse(BaseModel):

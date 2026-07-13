@@ -98,7 +98,12 @@ class RequiredSkill(BaseModel):
     skill_id: int = Field(gt=0, description="平台 job_skills 表中的技能 ID")
     name: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=100)
-    level: int = Field(default=0, ge=0, le=4, description="技能等级：0=未明确，1=了解，2=熟悉，3=掌握，4=精通")
+    level: int = Field(
+        default=0,
+        ge=0,
+        le=5,
+        description="技能等级：0=未接触，1=概念了解，2=入门实践，3=项目使用，4=独立落地，5=平台化能力",
+    )
     requirement: str | None = Field(default=None, description="根据岗位原文提炼的具体技能要求")
     knowledge_points: list[str] = Field(default_factory=list, max_length=20)
     tools: list[str] = Field(default_factory=list, max_length=20)
@@ -112,7 +117,12 @@ class PreferredSkill(BaseModel):
     skill_id: int = Field(gt=0, description="平台 job_skills 表中的技能 ID")
     name: str = Field(min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=100)
-    level: int = Field(default=0, ge=0, le=4, description="技能等级：0=未明确，1=了解，2=熟悉，3=掌握，4=精通")
+    level: int = Field(
+        default=0,
+        ge=0,
+        le=5,
+        description="技能等级：0=未接触，1=概念了解，2=入门实践，3=项目使用，4=独立落地，5=平台化能力",
+    )
     requirement: str | None = Field(default=None, description="根据岗位原文提炼的具体技能要求")
     tools: list[str] = Field(default_factory=list, max_length=20)
 
@@ -123,7 +133,14 @@ class GeneratedJobProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     job_name: str = Field(min_length=1, max_length=255)
-    job_overview: str | None = None
+    job_overview: str | None = Field(
+        default=None,
+        description=(
+            "岗位概览；应在其他画像字段提炼完成后，综合 job_name、responsibilities、"
+            "required_skills、experience_requirement 和 preferred_skills 生成，"
+            "概括岗位定位、核心工作、关键能力与经验侧重点"
+        ),
+    )
     responsibilities: list[JobResponsibility] = Field(default_factory=list, max_length=15)
     required_skills: list[RequiredSkill] = Field(default_factory=list)
     preferred_skills: list[PreferredSkill] = Field(default_factory=list, max_length=20)

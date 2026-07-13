@@ -18,10 +18,11 @@ def register_job_skill_tools(mcp: Any) -> None:
         description=(
             "根据多个关键词一次性批量查询平台已有岗位技能。"
             "应先汇总并去重全部技能后再调用，返回结果按关键词分组。"
-            "items 只是候选，调用方必须判断是否为同一技能；确认复用后使用候选项的 id 和标准 name。"
+            "items 按 match_score 从高到低排列；名称命中分数显著高于仅描述命中，match_type 用于说明命中依据。"
+            "结果仍然只是候选，调用方必须判断是否为同一技能；确认复用后使用候选项的 id 和标准 name。"
         ),
     )
-    async def search_job_skills(keywords: list[str], limit_per_keyword: int = 10) -> dict[str, Any]:
+    async def search_job_skills(keywords: list[str], limit_per_keyword: int = 3) -> dict[str, Any]:
         """从业务编排层数据库中查询平台岗位技能。
 
         Args:
