@@ -205,6 +205,8 @@ class MilvusVectorStoreService:
 
         safe_file_id = file_id.replace("\\", "\\\\").replace('"', '\\"')
         collection = Collection(name=collection_name, using=self.connection_alias)
+        # Milvus 3.0 要求 Collection 加载完成后才能执行标量条件删除。
+        collection.load(timeout=settings.milvus_write_timeout)
         collection.delete(
             expr=f'file_id == "{safe_file_id}"',
             timeout=settings.milvus_write_timeout,

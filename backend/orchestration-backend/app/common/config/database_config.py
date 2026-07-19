@@ -33,6 +33,7 @@ POSTGRES_CONFIG = {
     "username": os.getenv("POSTGRES_USER", ""),
     "password": os.getenv("POSTGRES_PASSWORD", ""),
     "database": os.getenv("POSTGRES_DATABASE", "career_ai"),
+    "connect_timeout": env_int("POSTGRES_CONNECT_TIMEOUT", 5),
 }
 
 postgres_connection_string = URL.create(

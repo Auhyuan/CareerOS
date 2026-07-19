@@ -2,7 +2,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, create_engine
 
-from app.common.config.database_config import postgres_connection_string
+from app.common.config.database_config import POSTGRES_CONFIG, postgres_connection_string
 
 
 # 创建全局 PostgreSQL 数据库引擎。
@@ -12,6 +12,8 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
+    # 数据库未启动或网络不可达时快速失败，避免服务启动长期卡住。
+    connect_args={"connect_timeout": POSTGRES_CONFIG["connect_timeout"]},
 )
 
 

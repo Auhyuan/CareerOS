@@ -3,6 +3,7 @@
 import asyncio
 from typing import Any
 
+from app.common.db.postgres_db import check_postgres_health
 from app.server.knowledge.src.config import knowledge_config
 from app.server.knowledge.src.embedding.schemas import EmbeddingInput, EmbeddingOutput
 from app.server.knowledge.src.embedding.service import embedding_service
@@ -76,6 +77,46 @@ class KnowledgeService:
     async def retrieve(self, request: RetrievalInput) -> RetrievalOutput:
         """执行底层 Collection 检索；正式知识库 API 后续负责 kb_id 映射。"""
         return await retrieval_service.retrieve(request)
+
+    async def readiness(self) -> dict[str, Any]:
+        """真实检查知识库运行依赖，并返回可供接口展示的组件状态。"""
+        checks: list[tuple[str, Any]] = [
+            ("postgresql", asyncio.to_thread(check_postgres_health)),
+            ("embedding", embedding_service.health_check()),
+            ("milvus_retrieval", milvus_store.health_check()),
+            ("milvus_vector_store", vector_store_service.health_check()),
+        ]
+        if knowledge_config.rerank_base_url:
+            checks.append(("rerank", rerank_client.health_check()))
+
+        results = await asyncio.gather(
+            *(
+                asyncio.wait_for(check, timeout=knowledge_config.startup_health_check_timeout)
+                for _, check in checks
+            ),
+            return_exceptions=True,
+        )
+
+        components: dict[str, dict[str, str]] = {}
+        for (name, _), result in zip(checks, results, strict=True):
+            if isinstance(result, Exception):
+                error_detail = str(result).strip() or result.__class__.__name__
+                components[name] = {
+                    "status": "failed",
+                    "detail": error_detail,
+                }
+            else:
+                components[name] = {
+                    "status": "ok",
+                    "detail": "ok" if result is None else str(result),
+                }
+
+        ready = all(component["status"] == "ok" for component in components.values())
+        return {
+            "status": "ready" if ready else "not_ready",
+            "worker": "enabled" if knowledge_config.ingestion_worker_enabled else "disabled",
+            "components": components,
+        }
 
     async def startup(self) -> None:
         """执行本地能力检查，并按配置选择是否检查外部依赖。"""

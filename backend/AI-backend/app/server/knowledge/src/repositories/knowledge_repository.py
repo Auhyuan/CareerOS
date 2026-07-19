@@ -83,7 +83,8 @@ class KnowledgeChunkRepository:
         document_id: int,
         chunks: list[KnowledgeChunk],
     ) -> None:
-        """在同一事务中删除文档旧分块并保存新分块。"""
+        """在当前事务中删除文档旧分块并暂存新分块，提交由业务层统一控制。"""
         db.exec(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id))
         db.add_all(chunks)
-        db.commit()
+        # 这里只刷新 SQL，不提交事务；调用方还需要同步更新文档版本和分块数量。
+        db.flush()

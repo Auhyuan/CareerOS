@@ -57,6 +57,35 @@ class KnowledgeServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(capabilities["ingestion"]["enabled"])
         self.assertEqual(capabilities["ingestion"]["queue"], "postgresql_skip_locked")
 
+    async def test_readiness_reports_dependency_timeout_type(self) -> None:
+        """依赖异常没有文本时，readiness 仍应返回可定位的异常类型。"""
+        with (
+            patch(
+                "app.server.knowledge.src.services.knowledge_service.check_postgres_health",
+            ),
+            patch(
+                "app.server.knowledge.src.services.knowledge_service.embedding_service.health_check",
+                new=AsyncMock(return_value=1024),
+            ),
+            patch(
+                "app.server.knowledge.src.services.knowledge_service.milvus_store.health_check",
+                new=AsyncMock(return_value="career_ai"),
+            ),
+            patch(
+                "app.server.knowledge.src.services.knowledge_service.vector_store_service.health_check",
+                new=AsyncMock(side_effect=TimeoutError()),
+            ),
+            patch(
+                "app.server.knowledge.src.services.knowledge_service.rerank_client.health_check",
+                new=AsyncMock(return_value=2),
+            ),
+        ):
+            result = await knowledge_service.readiness()
+
+        self.assertEqual(result["status"], "not_ready")
+        self.assertEqual(result["components"]["milvus_vector_store"]["status"], "failed")
+        self.assertEqual(result["components"]["milvus_vector_store"]["detail"], "TimeoutError")
+
 
 if __name__ == "__main__":
     unittest.main()

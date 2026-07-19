@@ -37,10 +37,17 @@ Worker 默认关闭。完成建表并准备好 Embedding 与 Milvus 后，在 `.
 KNOWLEDGE_INGESTION_WORKER_ENABLED=true
 ```
 
+## 可用性检查
+
+`/knowledge/health` 只表示路由已经挂载。完整入库前应调用
+`/knowledge/health/readiness`，确认 PostgreSQL、Embedding、Milvus 和可选
+Rerank 均为 `ok`，并确认响应中的 `worker` 为 `enabled`。
+
 ## 当前接口
 
 ```text
 GET  /knowledge/health
+GET  /knowledge/health/readiness
 GET  /knowledge/capabilities
 POST /knowledge/bases/create
 POST /knowledge/bases/search

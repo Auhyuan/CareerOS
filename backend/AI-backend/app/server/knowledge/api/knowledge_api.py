@@ -28,10 +28,16 @@ from app.server.knowledge.src.split.schemas import SplitInput, SplitOutput
 router = APIRouter(prefix="/knowledge")
 
 
-@router.get("/health", response_model=Result[dict[str, str]], summary="知识库服务健康检查")
+@router.get("/health", response_model=Result[dict[str, str]], summary="知识库服务存活检查")
 def knowledge_health() -> Result[dict[str, str]]:
-    """检查知识库服务是否已经挂载。"""
+    """只检查知识库路由是否已经挂载，不检查外部依赖。"""
     return Result.success({"service": "knowledge", "status": "ok"})
+
+
+@router.get("/health/readiness", response_model=Result[dict[str, Any]], summary="知识库依赖就绪检查")
+async def knowledge_readiness() -> Result[dict[str, Any]]:
+    """真实检查 PostgreSQL、模型服务和 Milvus 是否已经可用。"""
+    return Result.success(await knowledge_service.readiness())
 
 
 @router.get("/capabilities", response_model=Result[dict[str, Any]], summary="查询知识库能力")

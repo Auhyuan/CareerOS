@@ -1,8 +1,10 @@
 """知识入库组件的无外部依赖单元测试。"""
 
 import unittest
+from unittest.mock import MagicMock
 
 from app.server.knowledge.src.ingestion.executor import ingestion_executor
+from app.server.knowledge.src.repositories import KnowledgeChunkRepository
 from app.server.knowledge.src.services.knowledge_management_service import knowledge_management_service
 
 
@@ -47,6 +49,18 @@ class IngestionComponentTestCase(unittest.TestCase):
         name = knowledge_management_service._build_collection_name("kb-test/value")
 
         self.assertEqual(name, "knowledge_kb_test_value")
+
+    def test_replace_chunks_does_not_commit_business_transaction(self) -> None:
+        """替换分块只能刷新 SQL，最终事务必须由入库执行器统一提交。"""
+        db = MagicMock()
+        repository = KnowledgeChunkRepository()
+
+        repository.replace_document_chunks(db, document_id=1, chunks=[])
+
+        db.exec.assert_called_once()
+        db.add_all.assert_called_once_with([])
+        db.flush.assert_called_once_with()
+        db.commit.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from app.server.file.src.service.file_service import FileService
 from app.server.knowledge.src.config import knowledge_config
 from app.server.knowledge.src.embedding.schemas import PersistentVectorRecord
 from app.server.knowledge.src.embedding.service import embedding_service
+from app.server.knowledge.src.logging_config import logger
 from app.server.knowledge.src.models import IngestionRun, KnowledgeBase, KnowledgeChunk, KnowledgeDocument
 from app.server.knowledge.src.repositories import KnowledgeChunkRepository
 from app.server.knowledge.src.split.schemas import (
@@ -50,73 +51,100 @@ class IngestionExecutor:
             raise ValueError("文件切片结果为空，无法执行知识入库")
 
         target_version = document.index_version + 1 if run.operation == "reindex" else document.index_version
-        # 每次重试都先清理该文件旧向量，防止上一次部分写入形成重复或脏数据。
-        await vector_store_service.delete_file_vectors(knowledge.collection_name, run.file_id)
-
         chunk_records: list[KnowledgeChunk] = []
-        for chunk in chunks:
-            chunk_id = self._build_chunk_id(
-                knowledge_id=run.knowledge_id,
-                file_id=run.file_id,
-                index_version=target_version,
-                chunk_index=chunk.chunk_index,
-            )
-            embedding = await embedding_service.embed_text(
-                chunk.content,
-                model=knowledge.embedding_model,
-            )
-            context = self._build_context(chunk.metadata)
-            await vector_store_service.insert(
-                text=chunk.content,
-                embedding=embedding,
-                options=PersistentVectorRecord(
-                    collection_name=knowledge.collection_name,
-                    chunk_id=chunk_id,
-                    file_id=run.file_id,
-                    source=file_record.original_name,
-                    chunk_index=chunk.chunk_index,
-                    metadata=chunk.metadata,
-                ),
-                model_name=knowledge.embedding_model,
-                expected_dimension=knowledge.embedding_dimension,
-            )
-            chunk_records.append(
-                KnowledgeChunk(
+        try:
+            # 每次尝试都先清理该文件旧向量，防止重试时残留重复或脏数据。
+            await vector_store_service.delete_file_vectors(knowledge.collection_name, run.file_id)
+
+            for chunk in chunks:
+                chunk_id = self._build_chunk_id(
                     knowledge_id=run.knowledge_id,
-                    document_id=int(document.id),
                     file_id=run.file_id,
-                    chunk_id=chunk_id,
                     index_version=target_version,
                     chunk_index=chunk.chunk_index,
-                    raw_content=chunk.content,
-                    content_hash=hashlib.sha256(chunk.content.encode("utf-8")).hexdigest(),
-                    char_count=chunk.char_count,
-                    context=context,
-                    extra_metadata=chunk.metadata,
-                    vector_id=chunk_id,
                 )
-            )
+                embedding = await embedding_service.embed_text(
+                    chunk.content,
+                    model=knowledge.embedding_model,
+                )
+                context = self._build_context(chunk.metadata)
+                await vector_store_service.insert(
+                    text=chunk.content,
+                    embedding=embedding,
+                    options=PersistentVectorRecord(
+                        collection_name=knowledge.collection_name,
+                        chunk_id=chunk_id,
+                        file_id=run.file_id,
+                        source=file_record.original_name,
+                        chunk_index=chunk.chunk_index,
+                        metadata=chunk.metadata,
+                    ),
+                    model_name=knowledge.embedding_model,
+                    expected_dimension=knowledge.embedding_dimension,
+                )
+                chunk_records.append(
+                    KnowledgeChunk(
+                        knowledge_id=run.knowledge_id,
+                        document_id=int(document.id),
+                        file_id=run.file_id,
+                        chunk_id=chunk_id,
+                        index_version=target_version,
+                        chunk_index=chunk.chunk_index,
+                        raw_content=chunk.content,
+                        content_hash=hashlib.sha256(chunk.content.encode("utf-8")).hexdigest(),
+                        char_count=chunk.char_count,
+                        context=context,
+                        extra_metadata=chunk.metadata,
+                        vector_id=chunk_id,
+                    )
+                )
+        except Exception:
+            # 单个分块失败时，前面已经成功写入的向量不能留在可检索 Collection 中。
+            await self._cleanup_file_vectors(knowledge.collection_name, run)
+            raise
 
         # Milvus 全部写入成功后再替换 PostgreSQL 证据，避免数据库先显示成功但向量并不完整。
         with get_db_session() as db:
-            current_document = db.get(KnowledgeDocument, document.id)
-            if current_document is None:
-                raise ValueError(f"知识库文档关系已被删除: {document.id}")
-            self.chunk_repository.replace_document_chunks(db, int(document.id), chunk_records)
-            current_document = db.get(KnowledgeDocument, document.id)
-            current_document.index_version = target_version
-            current_document.chunk_count = len(chunk_records)
-            current_document.index_config = {
-                "split": split_result["effective_config"],
-                "split_method": split_result["split_method"],
-                "split_strategy": split_result["split_strategy"],
-                "embedding_model": knowledge.embedding_model,
-                "embedding_dimension": knowledge.embedding_dimension,
-            }
-            current_document.error_message = None
-            current_document.updated_at = utc_now()
-            db.add(current_document)
-            db.commit()
+            try:
+                current_document = db.get(KnowledgeDocument, document.id)
+                if current_document is None:
+                    raise ValueError(f"知识库文档关系已被删除: {document.id}")
+
+                # 分块证据和文档索引快照必须在同一 PostgreSQL 事务中提交，
+                # 防止只更新其中一部分后形成版本、数量与实际分块不一致。
+                self.chunk_repository.replace_document_chunks(db, int(document.id), chunk_records)
+                current_document.index_version = target_version
+                current_document.chunk_count = len(chunk_records)
+                current_document.index_config = {
+                    "split": split_result["effective_config"],
+                    "split_method": split_result["split_method"],
+                    "split_strategy": split_result["split_strategy"],
+                    "embedding_model": knowledge.embedding_model,
+                    "embedding_dimension": knowledge.embedding_dimension,
+                }
+                current_document.error_message = None
+                current_document.updated_at = utc_now()
+                db.add(current_document)
+                db.commit()
+            except Exception:
+                db.rollback()
+                # PostgreSQL 最终提交失败时也必须回收本次 Milvus 写入，
+                # 否则任务显示失败但残留向量仍可能被检索到。
+                await self._cleanup_file_vectors(knowledge.collection_name, run)
+                raise
+
+    @staticmethod
+    async def _cleanup_file_vectors(collection_name: str, run: IngestionRun) -> None:
+        """尽力清理失败任务产生的文件向量，同时保留原始异常供队列处理。"""
+        try:
+            await vector_store_service.delete_file_vectors(collection_name, run.file_id)
+        except Exception:
+            # 清理失败不能覆盖真正的入库错误，日志保留知识库和文件定位信息。
+            logger.exception(
+                "知识入库失败后的 Milvus 脏向量清理失败: knowledge_id=%s file_id=%s",
+                run.knowledge_id,
+                run.file_id,
+            )
 
     async def _load_sources(self, run: IngestionRun) -> tuple[KnowledgeBase, KnowledgeDocument, Any]:
         """读取并校验任务关联的知识库、文档关系和文件内容源。"""
