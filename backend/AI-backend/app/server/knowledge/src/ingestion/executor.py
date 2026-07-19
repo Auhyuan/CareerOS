@@ -9,6 +9,7 @@ from sqlmodel import select
 from app.common.db.postgres_db import get_db_session
 from app.server.file.src.service.file_service import FileService
 from app.server.knowledge.src.config import knowledge_config
+from app.server.agent.src.model.resource import resolve_model_resource
 from app.server.knowledge.src.embedding.schemas import PersistentVectorRecord
 from app.server.knowledge.src.embedding.service import embedding_service
 from app.server.knowledge.src.logging_config import logger
@@ -56,6 +57,8 @@ class IngestionExecutor:
             # 每次尝试都先清理该文件旧向量，防止重试时残留重复或脏数据。
             await vector_store_service.delete_file_vectors(knowledge.collection_name, run.file_id)
 
+            # 单次入库只解析一次模型连接信息，避免每个 Chunk 都重复查询 model_configs。
+            embedding_resource = resolve_model_resource(knowledge.embedding_model, "embedding")
             for chunk in chunks:
                 chunk_id = self._build_chunk_id(
                     knowledge_id=run.knowledge_id,
@@ -65,7 +68,8 @@ class IngestionExecutor:
                 )
                 embedding = await embedding_service.embed_text(
                     chunk.content,
-                    model=knowledge.embedding_model,
+                    model_code=knowledge.embedding_model,
+                    resource=embedding_resource,
                 )
                 context = self._build_context(chunk.metadata)
                 await vector_store_service.insert(

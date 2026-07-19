@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ModelType = Literal["chat", "embedding", "rerank"]
@@ -28,6 +28,16 @@ class ModelConfigUpsertRequest(BaseModel):
 
     extra_config: dict[str, Any] | None = Field(default=None, description="Extra model config")
     description: str | None = Field(default=None, description="Model description")
+
+    @model_validator(mode="after")
+    def validate_embedding_dimension(self) -> "ModelConfigUpsertRequest":
+        """Embedding 模型必须配置正整数向量维度。"""
+        if self.model_type != "embedding":
+            return self
+        dimension = (self.extra_config or {}).get("dimension")
+        if not isinstance(dimension, int) or dimension <= 0:
+            raise ValueError("Embedding 模型必须在 extra_config.dimension 配置正整数向量维度")
+        return self
 
     @field_validator("model_code", "model_name", "model_type", "base_url", "api_type")
     @classmethod

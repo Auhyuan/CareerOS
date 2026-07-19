@@ -11,6 +11,7 @@ class KnowledgeBaseCreateRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    embedding_model_code: str = Field(min_length=1, max_length=100)
     split_config: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -29,7 +30,7 @@ class KnowledgeBaseResponse(BaseModel):
     name: str
     description: str | None
     collection_name: str
-    embedding_model: str
+    embedding_model_code: str
     embedding_dimension: int
     split_config: dict[str, Any]
     status: str

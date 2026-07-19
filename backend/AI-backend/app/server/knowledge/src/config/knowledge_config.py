@@ -13,20 +13,6 @@ class KnowledgeConfig(BaseSettings):
     split_chunk_size: int = Field(default=1000, ge=1)
     split_chunk_overlap: int = Field(default=200, ge=0)
 
-    embedding_base_url: str = Field(default="http://127.0.0.1:8000/v1")
-    embedding_model: str = Field(default="embedding")
-    embedding_api_key: str = Field(default="")
-    embedding_timeout: float = Field(default=360, ge=1)
-    embedding_dimension: int = Field(default=1024, ge=1)
-    embedding_retry_times: int = Field(default=2, ge=0)
-
-    rerank_base_url: str = Field(default="")
-    rerank_model: str = Field(default="reranker")
-    rerank_api_key: str = Field(default="")
-    rerank_timeout: float = Field(default=360, ge=1)
-    rerank_max_candidates: int = Field(default=30, ge=1)
-    rerank_max_chars: int = Field(default=1500, ge=100)
-
     http_max_keepalive_connections: int = Field(default=5, ge=1)
     http_max_connections: int = Field(default=10, ge=1)
 
@@ -38,10 +24,6 @@ class KnowledgeConfig(BaseSettings):
     milvus_query_timeout: float = Field(default=15, ge=1)
     milvus_nprobe: int = Field(default=10, ge=1)
 
-    default_top_k: int = Field(default=10, ge=1, le=100, alias="RETRIEVAL_DEFAULT_TOP_K")
-    default_fetch_k: int = Field(default=30, ge=1, le=200, alias="RETRIEVAL_DEFAULT_FETCH_K")
-    default_similarity_threshold: float = Field(default=0.2, ge=-1, le=1, alias="RETRIEVAL_DEFAULT_SIMILARITY_THRESHOLD")
-    default_rrf_k: int = Field(default=60, ge=1, alias="RETRIEVAL_DEFAULT_RRF_K")
     metadata_headers_weight: float = Field(default=0.6, ge=0, le=10, alias="RETRIEVAL_METADATA_HEADERS_WEIGHT")
     document_max_chunks: int = Field(default=5000, ge=1, alias="RETRIEVAL_DOCUMENT_MAX_CHUNKS")
 
@@ -67,14 +49,6 @@ class KnowledgeConfig(BaseSettings):
     )
     ingestion_max_retries: int = Field(default=3, ge=0, alias="KNOWLEDGE_INGESTION_MAX_RETRIES")
     ingestion_retry_delay_seconds: int = Field(default=5, ge=1, alias="KNOWLEDGE_INGESTION_RETRY_DELAY_SECONDS")
-
-    @property
-    def embedding_endpoint(self) -> str:
-        """返回 OpenAI 兼容的 Embedding 接口地址。"""
-        clean_url = self.embedding_base_url.rstrip("/")
-        if clean_url.endswith("/embeddings"):
-            return clean_url
-        return f"{clean_url}/embeddings"
 
     @model_validator(mode="after")
     def validate_split_config(self) -> "KnowledgeConfig":

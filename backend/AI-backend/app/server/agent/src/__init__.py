@@ -1,4 +1,4 @@
-from app.server.agent.src.agent import AgentAssembly, AgentService
+"""Agent 服务内部实现包。
 
-
-__all__ = ["AgentAssembly", "AgentService"]
+子模块按需导入，避免模型、工具和 Knowledge 之间产生循环依赖。
+"""

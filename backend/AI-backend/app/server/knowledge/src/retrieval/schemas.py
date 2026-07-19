@@ -76,7 +76,7 @@ class RetrievalConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     """检索查询向量使用的 Embedding 配置。"""
 
-    model_name: str = Field(..., min_length=1, description="Embedding 模型名称")
+    model_code: str = Field(..., min_length=1, description="平台 Embedding 模型编码")
     dimension: int = Field(..., ge=1, description="预期向量维度")
 
 
@@ -84,18 +84,18 @@ class RerankConfig(BaseModel):
     """检索候选结果使用的 Rerank 配置。"""
 
     enable: bool = Field(default=False, description="是否启用 Rerank")
-    model_name: str | None = Field(
+    model_code: str | None = Field(
         default=None,
-        description="Rerank 模型名称；不传时使用服务默认配置",
+        description="平台 Rerank 模型编码；启用 Rerank 时必须提供",
     )
-    max_candidates: int | None = Field(
-        default=None,
+    max_candidates: int = Field(
+        default=30,
         ge=1,
         le=200,
         description="最多送入 Rerank 的候选数量；不传时使用服务默认配置",
     )
-    max_chars: int | None = Field(
-        default=None,
+    max_chars: int = Field(
+        default=1500,
         ge=100,
         le=10000,
         description="单条候选送入 Rerank 的最大字符数；不传时使用服务默认配置",

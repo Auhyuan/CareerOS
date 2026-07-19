@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlmodel import Session, delete, select
+from sqlmodel import Session, col, delete, select
 
 from app.server.knowledge.src.models import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
 
@@ -26,6 +26,17 @@ class KnowledgeBaseRepository:
         """根据对外知识库 ID 查询知识库。"""
         statement = select(KnowledgeBase).where(KnowledgeBase.knowledge_id == knowledge_id)
         return db.exec(statement).first()
+
+    def get_by_collection_names(
+        self,
+        db: Session,
+        collection_names: list[str],
+    ) -> list[KnowledgeBase]:
+        """按 Collection 名称批量查询知识库，供检索阶段解析绑定模型。"""
+        statement = select(KnowledgeBase).where(
+            col(KnowledgeBase.collection_name).in_(collection_names)
+        )
+        return list(db.exec(statement).all())
 
     def search(self, db: Session, keyword: str | None, status: str | None) -> list[KnowledgeBase]:
         """按名称关键字和状态查询知识库列表。"""

@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.server.knowledge.src.embedding.schemas import EmbeddingInput
+from app.server.knowledge.src.embedding.schemas import EmbeddingInput, EmbeddingModelConfig
 from app.server.knowledge.src.services.knowledge_service import knowledge_service
 from app.server.knowledge.src.split.schemas import (
     MarkdownDocumentHeaderThenRecursiveStrategyConfig,
@@ -40,14 +40,23 @@ class KnowledgeServiceTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_embed_text_only_returns_temporary_vector(self) -> None:
         """临时向量化应校验维度并返回统一输出，不触发向量持久化。"""
-        fake_vector = [0.1] * 1024
+        fake_vector = [0.1] * 3
         with patch(
             "app.server.knowledge.src.services.knowledge_service.embedding_service.embed_text",
             new=AsyncMock(return_value=fake_vector),
         ):
-            output = await knowledge_service.embed_text(EmbeddingInput(text="测试文本"))
+            output = await knowledge_service.embed_text(
+                EmbeddingInput(
+                    text="测试文本",
+                    model_config=EmbeddingModelConfig(
+                        model_code="embedding-test",
+                        dimension=3,
+                    ),
+                )
+            )
 
-        self.assertEqual(output.dimension, 1024)
+        self.assertEqual(output.model_code, "embedding-test")
+        self.assertEqual(output.dimension, 3)
         self.assertEqual(output.embedding, fake_vector)
 
     def test_capabilities_exposes_postgres_ingestion_queue(self) -> None:

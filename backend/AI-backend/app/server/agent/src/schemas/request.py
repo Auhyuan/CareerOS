@@ -2,6 +2,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.server.agent.src.model.constants import (
+    DEFAULT_MODEL_MAX_RETRIES,
+    DEFAULT_MODEL_TIMEOUT_SECONDS,
+)
 from app.server.agent.src.schemas.context_summarization import ContextSummarizationConfig
 
 
@@ -22,13 +26,13 @@ class ModelRuntimeOptions(BaseModel):
         le=2,
         description="模型采样温度，数值越低输出越稳定，数值越高输出越发散。",
     )
-    timeout_seconds: int | None = Field(
-        default=None,
+    timeout_seconds: int = Field(
+        default=DEFAULT_MODEL_TIMEOUT_SECONDS,
         ge=1,
-        description="模型调用超时时间；为空时交给模型客户端使用默认值。",
+        description="模型调用超时时间；Chat、Embedding、Rerank 共用同一默认值。",
     )
     max_retries: int = Field(
-        default=2,
+        default=DEFAULT_MODEL_MAX_RETRIES,
         ge=0,
         description="模型调用失败时的最大重试次数。",
     )

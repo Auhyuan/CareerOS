@@ -115,7 +115,7 @@ ON knowledge.knowledge_chunks(file_id);
 COMMENT ON TABLE knowledge.knowledge_bases IS '知识库定义与索引配置表';
 COMMENT ON COLUMN knowledge.knowledge_bases.knowledge_id IS '对外使用的稳定知识库ID';
 COMMENT ON COLUMN knowledge.knowledge_bases.collection_name IS '知识库对应的Milvus Collection名称';
-COMMENT ON COLUMN knowledge.knowledge_bases.embedding_model IS '创建Collection和执行入库时使用的Embedding模型';
+COMMENT ON COLUMN knowledge.knowledge_bases.embedding_model IS '知识库绑定的model_configs.model_code，创建Collection、入库和检索始终使用该模型';
 COMMENT ON COLUMN knowledge.knowledge_bases.embedding_dimension IS 'Embedding向量维度，创建后不可随意修改';
 COMMENT ON COLUMN knowledge.knowledge_bases.split_config IS '默认切片方式或组合切片策略配置';
 COMMENT ON COLUMN knowledge.knowledge_bases.metadata IS '非核心扩展元数据';

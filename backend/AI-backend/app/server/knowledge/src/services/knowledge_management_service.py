@@ -6,6 +6,7 @@ from uuid import uuid4
 from sqlmodel import Session
 
 from app.server.file.src.models.file_models import UploadedFileRecord
+from app.server.agent.src.model.service import ModelConfigService
 from app.server.knowledge.src.config import knowledge_config
 from app.server.knowledge.src.ingestion.queue_service import ingestion_queue_service
 from app.server.knowledge.src.models import KnowledgeBase, KnowledgeDocument
@@ -33,6 +34,7 @@ class KnowledgeManagementService:
         """初始化知识库与文档 Repository。"""
         self.knowledge_repository = KnowledgeBaseRepository()
         self.document_repository = KnowledgeDocumentRepository()
+        self.model_config_service = ModelConfigService()
 
     async def create_knowledge_base(
         self,
@@ -43,18 +45,31 @@ class KnowledgeManagementService:
         knowledge_id = f"kb_{uuid4().hex}"
         collection_name = self._build_collection_name(knowledge_id)
         split_config = self._normalize_split_config(request.split_config)
+
+        # 知识库在创建时明确绑定 Embedding 模型，后续入库和检索始终复用该 model_code。
+        embedding_model = self.model_config_service.require_enabled_model(
+            db,
+            request.embedding_model_code,
+            "embedding",
+        )
+        embedding_dimension = (embedding_model.extra_config or {}).get("dimension")
+        if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
+            raise ValueError(
+                f"Embedding 模型 {embedding_model.model_code} 必须配置 extra_config.dimension"
+            )
+
         await vector_store_service.create_collection(
             collection_name=collection_name,
-            model_name=knowledge_config.embedding_model,
-            dimension=knowledge_config.embedding_dimension,
+            model_name=embedding_model.model_code,
+            dimension=embedding_dimension,
         )
         record = KnowledgeBase(
             knowledge_id=knowledge_id,
             name=request.name.strip(),
             description=request.description,
             collection_name=collection_name,
-            embedding_model=knowledge_config.embedding_model,
-            embedding_dimension=knowledge_config.embedding_dimension,
+            embedding_model=embedding_model.model_code,
+            embedding_dimension=embedding_dimension,
             split_config=split_config,
             extra_metadata=request.metadata,
         )
@@ -152,7 +167,7 @@ class KnowledgeManagementService:
             name=record.name,
             description=record.description,
             collection_name=record.collection_name,
-            embedding_model=record.embedding_model,
+            embedding_model_code=record.embedding_model,
             embedding_dimension=record.embedding_dimension,
             split_config=record.split_config,
             status=record.status,

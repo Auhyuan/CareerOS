@@ -5,95 +5,95 @@ from typing import Any
 
 import httpx
 
+from app.server.agent.src.model.constants import (
+    DEFAULT_MODEL_MAX_RETRIES,
+    DEFAULT_MODEL_TIMEOUT_SECONDS,
+    MODEL_RETRYABLE_STATUS_CODES,
+)
+from app.server.agent.src.model.resource import ModelRuntimeResource, resolve_model_resource
 from app.server.knowledge.src.config import knowledge_config as settings
 from app.server.knowledge.src.logging_config import logger
 
 
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
-
-
 class EmbeddingService:
-    """Embedding 原子能力服务。"""
+    """通过 model_configs 中的 Embedding 模型配置生成向量。"""
 
     def __init__(self) -> None:
-        """
-        初始化 embedding 服务。
-
-        这里复用一个 AsyncClient，避免每次请求都重新创建连接。
-        """
+        """创建可复用连接池，模型连接信息在调用时按 model_code 解析。"""
         limits = httpx.Limits(
             max_keepalive_connections=settings.http_max_keepalive_connections,
             max_connections=settings.http_max_connections,
         )
-        self._client = httpx.AsyncClient(timeout=settings.embedding_timeout, limits=limits)
+        self._client = httpx.AsyncClient(limits=limits)
 
     async def close(self) -> None:
-        """关闭底层 HTTP 客户端连接池。"""
+        """关闭底层 HTTP 连接池。"""
         await self._client.aclose()
 
-    async def health_check(self) -> int:
-        """
-        调用下游 embedding 服务执行一次真实健康检查。
-
-        Returns:
-            int: 下游模型实际返回的向量维度
-
-        Raises:
-            ValueError: 下游返回向量维度与服务配置不一致
-            httpx.HTTPError: 下游服务不可访问或返回错误状态码
-        """
+    async def health_check(self, model_code: str) -> int:
+        """调用指定 Embedding 模型并校验实际向量维度。"""
+        resource = resolve_model_resource(model_code, "embedding")
         vector = await self.embed_text(
             text="embedding service health check",
-            model=settings.embedding_model,
+            model_code=model_code,
         )
         actual_dimension = len(vector)
-        if actual_dimension != settings.embedding_dimension:
+        if resource.dimension is None:
+            raise ValueError(f"Embedding 模型 {model_code} 未配置向量维度")
+        if actual_dimension != resource.dimension:
             raise ValueError(
                 "embedding health check dimension mismatch: "
-                f"expected {settings.embedding_dimension}, got {actual_dimension}"
+                f"expected {resource.dimension}, got {actual_dimension}"
             )
         return actual_dimension
 
     async def embed_text(
         self,
         text: str,
-        model: str | None = None,
+        model_code: str,
         extra_params: dict[str, Any] | None = None,
+        resource: ModelRuntimeResource | None = None,
+        timeout_seconds: int = DEFAULT_MODEL_TIMEOUT_SECONDS,
+        max_retries: int = DEFAULT_MODEL_MAX_RETRIES,
     ) -> list[float]:
-        """
-        生成单条文本向量。
-
-        Args:
-            text: 待向量化文本
-            model: 可选模型名称，不传则使用默认模型
-            extra_params: 透传给下游 embedding 接口的额外参数
-
-        Returns:
-            list[float]: 文本向量
-        """
+        """使用知识库绑定的 Embedding model_code 生成单条文本向量。"""
         clean_text = self._normalize_text(text)
+        resolved_resource = resource or resolve_model_resource(model_code, "embedding")
+        if resolved_resource.model_code != model_code:
+            raise ValueError("Embedding model_code 与预解析模型资源不一致")
         payload: dict[str, Any] = {
-            "model": model or settings.embedding_model,
-            # OpenAI-compatible embedding 协议使用 input 数组，本服务对外仍只处理单条文本。
+            "model": resolved_resource.model_name,
             "input": [clean_text],
         }
         if extra_params:
             payload.update(extra_params)
 
-        response = await self._post_embedding_with_retry(payload)
+        response = await self._post_embedding_with_retry(
+            resource=resolved_resource,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+        )
         return self._parse_embedding_response(response.json())
 
-    async def _post_embedding_with_retry(self, payload: dict[str, Any]) -> httpx.Response:
-        """请求下游 Embedding 接口，对网关抖动和 5xx 错误做有限重试。"""
-        max_attempts = settings.embedding_retry_times + 1
+    async def _post_embedding_with_retry(
+        self,
+        *,
+        resource: ModelRuntimeResource,
+        payload: dict[str, Any],
+        timeout_seconds: int,
+        max_retries: int,
+    ) -> httpx.Response:
+        """调用 Embedding 接口，并使用统一模型参数处理重试。"""
+        max_attempts = max_retries + 1
         last_error: Exception | None = None
-
         for attempt_index in range(max_attempts):
             try:
                 response = await self._client.post(
-                    settings.embedding_endpoint,
+                    self._build_endpoint(resource.base_url),
                     json=payload,
-                    headers=self._build_headers(),
+                    headers=self._build_headers(resource.api_key),
+                    timeout=timeout_seconds,
                 )
                 response.raise_for_status()
                 return response
@@ -101,10 +101,10 @@ class EmbeddingService:
                 last_error = exc
                 if not self._should_retry(exc) or attempt_index >= max_attempts - 1:
                     raise
-
-                wait_seconds = self._build_retry_wait_seconds(attempt_index)
+                wait_seconds = min(0.5 * (attempt_index + 1), 3.0)
                 logger.warning(
-                    "Embedding 模型请求失败，准备重试：attempt=%s/%s，wait=%.2fs，reason=%s",
+                    "Embedding 模型请求失败，准备重试：model_code=%s attempt=%s/%s wait=%.2fs reason=%s",
+                    resource.model_code,
                     attempt_index + 1,
                     max_attempts,
                     wait_seconds,
@@ -112,14 +112,19 @@ class EmbeddingService:
                 )
                 await asyncio.sleep(wait_seconds)
 
-        # 理论上不会走到这里，保留防御性异常便于排查。
         raise RuntimeError("embedding request failed without captured exception") from last_error
 
     @staticmethod
+    def _build_endpoint(base_url: str) -> str:
+        """兼容模型地址填写到 /v1 或完整 /embeddings 的形式。"""
+        clean_url = base_url.rstrip("/")
+        return clean_url if clean_url.endswith("/embeddings") else f"{clean_url}/embeddings"
+
+    @staticmethod
     def _should_retry(exc: Exception) -> bool:
-        """判断下游异常是否属于可重试的短暂故障。"""
+        """判断模型异常是否属于可重试的短暂故障。"""
         if isinstance(exc, httpx.HTTPStatusError):
-            return exc.response.status_code in _RETRYABLE_STATUS_CODES
+            return exc.response.status_code in MODEL_RETRYABLE_STATUS_CODES
         return isinstance(
             exc,
             (
@@ -133,11 +138,7 @@ class EmbeddingService:
         )
 
     @staticmethod
-    def _build_retry_wait_seconds(attempt_index: int) -> float:
-        """根据重试轮次生成简单递增等待时间。"""
-        return min(0.5 * (attempt_index + 1), 3.0)
-
-    def _normalize_text(self, text: str) -> str:
+    def _normalize_text(text: str) -> str:
         """校验并清理单条文本输入。"""
         if not isinstance(text, str):
             raise ValueError("text must be string")
@@ -146,22 +147,17 @@ class EmbeddingService:
             raise ValueError("text cannot be empty")
         return clean_text
 
-    def _build_headers(self) -> dict[str, str]:
-        """构造下游 embedding 请求头。"""
-        if not settings.embedding_api_key:
-            return {}
-        return {"Authorization": f"Bearer {settings.embedding_api_key}"}
+    @staticmethod
+    def _build_headers(api_key: str | None) -> dict[str, str]:
+        """使用模型配置中的 API Key 构造鉴权请求头。"""
+        return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
-    def _parse_embedding_response(self, data: dict[str, Any]) -> list[float]:
-        """
-        解析单条 OpenAI-compatible embedding 响应。
-
-        预期格式为 {"data": [{"embedding": [...]}]}。
-        """
+    @staticmethod
+    def _parse_embedding_response(data: dict[str, Any]) -> list[float]:
+        """解析 OpenAI-compatible 单条 Embedding 响应。"""
         items = data.get("data") or []
         if len(items) != 1:
             raise ValueError("embedding response size mismatch")
-
         item = items[0]
         embedding = item.get("embedding") if isinstance(item, dict) else None
         if not isinstance(embedding, list):
@@ -169,5 +165,4 @@ class EmbeddingService:
         return [float(value) for value in embedding]
 
 
-# 模块级单例，供路由层复用。
 embedding_service = EmbeddingService()

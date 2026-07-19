@@ -44,6 +44,18 @@ class ModelConfigService:
         record = self.repository.get_by_model_code(db, model_code)
         return self.to_view(record) if record else None
 
+    def require_enabled_model(
+        self,
+        db: Session,
+        model_code: str,
+        model_type: str,
+    ) -> ModelConfigRecord:
+        """校验并返回指定编码、指定类型的已启用模型。"""
+        record = self.repository.get_enabled_by_code_and_type(db, model_code, model_type)
+        if record is None:
+            raise RuntimeError(f"模型 {model_code} 不存在、未启用，或不是 {model_type} 类型")
+        return record
+
     def search_models(self, db: Session, request: ModelConfigSearchRequest) -> ModelConfigSearchResponse:
         """分页查询模型配置列表。"""
         rows, total = self.repository.list_configs(

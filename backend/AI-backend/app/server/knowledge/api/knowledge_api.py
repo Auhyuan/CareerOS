@@ -36,7 +36,7 @@ def knowledge_health() -> Result[dict[str, str]]:
 
 @router.get("/health/readiness", response_model=Result[dict[str, Any]], summary="知识库依赖就绪检查")
 async def knowledge_readiness() -> Result[dict[str, Any]]:
-    """真实检查 PostgreSQL、模型服务和 Milvus 是否已经可用。"""
+    """真实检查 PostgreSQL 和 Milvus 是否已经可用。"""
     return Result.success(await knowledge_service.readiness())
 
 

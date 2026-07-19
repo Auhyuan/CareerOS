@@ -29,11 +29,11 @@ class KnowledgeService:
                 "methods": ["markdown", "markdown_header", "recursive_character", "character", "qa_separator"],
                 "strategies": ["markdown_document_header_then_recursive"],
             },
-            "embedding": {"enabled": True, "model": knowledge_config.embedding_model},
+            "embedding": {"enabled": True, "config_source": "model_configs"},
             "retrieval": {
                 "enabled": True,
                 "modes": ["vector", "keyword", "hybrid", "document"],
-                "rerank_configured": bool(knowledge_config.rerank_base_url),
+                "rerank_configured": "per_request_model_code",
             },
             "ingestion": {
                 "enabled": True,
@@ -63,16 +63,22 @@ class KnowledgeService:
     async def embed_text(self, request: EmbeddingInput) -> EmbeddingOutput:
         """生成临时向量，不执行 Collection 创建或向量持久化。"""
         model_config = request.embedding_model_config
-        model_name = model_config.model_name if model_config else knowledge_config.embedding_model
-        expected_dimension = model_config.dimension if model_config else knowledge_config.embedding_dimension
+        if model_config is None:
+            raise ValueError("向量预览必须提供 model_config.model_code 和 dimension")
         vector = await embedding_service.embed_text(
             request.text,
-            model=model_name,
+            model_code=model_config.model_code,
             extra_params=request.extra_params,
         )
-        if len(vector) != expected_dimension:
-            raise ValueError(f"Embedding 向量维度不匹配: expected={expected_dimension}, actual={len(vector)}")
-        return EmbeddingOutput(model_name=model_name, dimension=len(vector), embedding=vector)
+        if len(vector) != model_config.dimension:
+            raise ValueError(
+                f"Embedding 向量维度不匹配: expected={model_config.dimension}, actual={len(vector)}"
+            )
+        return EmbeddingOutput(
+            model_code=model_config.model_code,
+            dimension=len(vector),
+            embedding=vector,
+        )
 
     async def retrieve(self, request: RetrievalInput) -> RetrievalOutput:
         """执行底层 Collection 检索；正式知识库 API 后续负责 kb_id 映射。"""
@@ -82,13 +88,9 @@ class KnowledgeService:
         """真实检查知识库运行依赖，并返回可供接口展示的组件状态。"""
         checks: list[tuple[str, Any]] = [
             ("postgresql", asyncio.to_thread(check_postgres_health)),
-            ("embedding", embedding_service.health_check()),
             ("milvus_retrieval", milvus_store.health_check()),
             ("milvus_vector_store", vector_store_service.health_check()),
         ]
-        if knowledge_config.rerank_base_url:
-            checks.append(("rerank", rerank_client.health_check()))
-
         results = await asyncio.gather(
             *(
                 asyncio.wait_for(check, timeout=knowledge_config.startup_health_check_timeout)
@@ -126,12 +128,8 @@ class KnowledgeService:
             logger.info("知识库外部依赖检查已跳过，可通过 KNOWLEDGE_STARTUP_DEPENDENCY_CHECK 开启")
         else:
             checks: list[tuple[str, Any]] = [
-                ("embedding", embedding_service.health_check()),
                 ("milvus", milvus_store.health_check()),
             ]
-            if knowledge_config.rerank_base_url:
-                checks.append(("rerank", rerank_client.health_check()))
-
             results = await asyncio.gather(
                 *(asyncio.wait_for(check, timeout=knowledge_config.startup_health_check_timeout) for _, check in checks),
                 return_exceptions=True,

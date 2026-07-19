@@ -5,6 +5,10 @@ from typing import Any
 from sqlmodel import Session
 
 from app.common.db.postgres_db import get_db_session
+from app.server.agent.src.model.constants import (
+    DEFAULT_MODEL_MAX_RETRIES,
+    DEFAULT_MODEL_TIMEOUT_SECONDS,
+)
 from app.server.agent.src.model.openai_chat import ReasoningChatOpenAI
 from app.server.agent.src.model.service import ModelConfigService
 
@@ -50,8 +54,8 @@ class AgentModelService:
         db: Session | None = None,
         model_code: str | None = None,
         temperature: float = 0.2,
-        timeout_seconds: int | None = None,
-        max_retries: int = 2,
+        timeout_seconds: int = DEFAULT_MODEL_TIMEOUT_SECONDS,
+        max_retries: int = DEFAULT_MODEL_MAX_RETRIES,
     ) -> Any:
         """根据 model_code 从数据库读取配置并创建 LangChain ChatModel。"""
         self.configure_langsmith_environment()
@@ -111,8 +115,8 @@ def create_chat_model(
     db: Session | None = None,
     model_code: str | None = None,
     temperature: float = 0.2,
-    timeout_seconds: int | None = None,
-    max_retries: int = 2,
+    timeout_seconds: int = DEFAULT_MODEL_TIMEOUT_SECONDS,
+    max_retries: int = DEFAULT_MODEL_MAX_RETRIES,
 ) -> Any:
     """创建 Agent 聊天模型的便捷函数。"""
     return AgentModelService().create_chat_model(

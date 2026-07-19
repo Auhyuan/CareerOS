@@ -23,6 +23,20 @@ class ModelConfigRepository:
         )
         return db.exec(sql).first()
 
+    def get_enabled_by_code_and_type(
+        self,
+        db: Session,
+        model_code: str,
+        model_type: str,
+    ) -> ModelConfigRecord | None:
+        """按模型编码和类型查询已启用模型。"""
+        sql = select(ModelConfigRecord).where(
+            ModelConfigRecord.model_code == model_code,
+            ModelConfigRecord.model_type == model_type,
+            ModelConfigRecord.enabled.is_(True),
+        )
+        return db.exec(sql).first()
+
     def save(self, db: Session, record: ModelConfigRecord) -> ModelConfigRecord:
         """保存模型配置并刷新数据库生成字段。"""
         db.add(record)

@@ -3,6 +3,8 @@
 import asyncio
 import re
 
+from app.common.db.postgres_db import get_db_session
+from app.server.knowledge.src.repositories import KnowledgeBaseRepository
 from app.server.knowledge.src.config import knowledge_config as settings
 from app.server.knowledge.src.retrieval.schemas import (
     EmbeddingConfig,
@@ -80,9 +82,8 @@ class RetrievalService:
                 rerank_used=rerank_used,
             )
 
-        embedding_config = retrieval_input.embedding_config or EmbeddingConfig(
-            model_name=settings.embedding_model,
-            dimension=settings.embedding_dimension,
+        embedding_config = retrieval_input.embedding_config or self._resolve_embedding_config(
+            retrieval_input.collection_list
         )
         # Vector 与 Hybrid 都只需要为同一个 query 生成一次查询向量，多 Collection 共享该向量。
         query_vector = await self._embed_query(
@@ -174,7 +175,7 @@ class RetrievalService:
     async def _embed_query(self, *, query: str, config: EmbeddingConfig) -> list[float]:
         """复用统一 EmbeddingService 生成查询向量并校验维度。"""
         try:
-            vector = await embedding_service.embed_text(query, model=config.model_name)
+            vector = await embedding_service.embed_text(query, model_code=config.model_code)
         except Exception as exc:  # noqa: BLE001
             raise RetrievalDependencyError(f"Embedding 模型请求失败: {exc}") from exc
         if len(vector) != config.dimension:
@@ -193,9 +194,8 @@ class RetrievalService:
         enhance_config: EnhanceConfig,
     ) -> RetrievalOutput:
         """执行全文召回：先定位最相关文档，再回查该文档全部 Chunk 并拼接原文。"""
-        embedding_config = retrieval_input.embedding_config or EmbeddingConfig(
-            model_name=settings.embedding_model,
-            dimension=settings.embedding_dimension,
+        embedding_config = retrieval_input.embedding_config or self._resolve_embedding_config(
+            retrieval_input.collection_list
         )
         # Document 模式第一步仍是召回候选 Chunk，用命中 Chunk 的 file_id 定位整篇文档。
         query_vector = await self._embed_query(
@@ -441,8 +441,8 @@ class RetrievalService:
         if not rerank_config.enable or len(chunks) <= 1:
             return chunks, False
 
-        max_candidates = rerank_config.max_candidates or settings.rerank_max_candidates
-        max_chars = rerank_config.max_chars or settings.rerank_max_chars
+        max_candidates = rerank_config.max_candidates
+        max_chars = rerank_config.max_chars
         rerank_candidates = chunks[:max_candidates]
         remaining_chunks = chunks[max_candidates:]
         # 先拼接 source + headers + content，再整体截断；
@@ -626,16 +626,37 @@ class RetrievalService:
         return fused_chunks
 
     @staticmethod
+    def _resolve_embedding_config(collection_list: list[str]) -> EmbeddingConfig:
+        """根据知识库 Collection 解析并校验统一的 Embedding 模型配置。"""
+        repository = KnowledgeBaseRepository()
+        with get_db_session() as db:
+            records = repository.get_by_collection_names(db, collection_list)
+
+        records_by_collection = {record.collection_name: record for record in records}
+        missing_collections = [
+            name for name in collection_list if name not in records_by_collection
+        ]
+        if missing_collections:
+            raise RetrievalValidationError(
+                "以下 Collection 未关联知识库：" + "、".join(missing_collections)
+            )
+
+        model_pairs = {
+            (record.embedding_model, record.embedding_dimension)
+            for record in records
+        }
+        if len(model_pairs) != 1:
+            raise RetrievalValidationError(
+                "多知识库联合向量检索要求使用相同的 Embedding 模型和向量维度"
+            )
+
+        model_code, dimension = next(iter(model_pairs))
+        return EmbeddingConfig(model_code=model_code, dimension=dimension)
+
+    @staticmethod
     def _default_config() -> RetrievalConfig:
-        """根据服务环境变量构造本次默认向量检索配置。"""
-        return RetrievalConfig(
-            mode="vector",
-            top_k=settings.default_top_k,
-            fetch_k=settings.default_fetch_k,
-            similarity_threshold=settings.default_similarity_threshold,
-            metric_type="COSINE",
-            rrf_k=settings.default_rrf_k,
-        )
+        """使用 RetrievalConfig 自身定义的默认召回参数。"""
+        return RetrievalConfig()
 
 
 # 模块级单例供 Router 复用。

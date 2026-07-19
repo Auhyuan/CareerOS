@@ -10,7 +10,7 @@ export interface KnowledgeBaseItem {
   name: string
   description?: string | null
   collection_name: string
-  embedding_model: string
+  embedding_model_code: string
   embedding_dimension: number
   split_config: Record<string, unknown>
   status: string
@@ -19,7 +19,21 @@ export interface KnowledgeBaseItem {
   updated_at: string
 }
 
+/** 创建知识库时明确绑定一个已启用的 Embedding 模型。 */
+export interface KnowledgeBaseCreatePayload {
+  name: string
+  description?: string | null
+  embedding_model_code: string
+  split_config?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
 /** 查询知识库列表。 */
 export function searchKnowledgeBases(params: { keyword?: string; status?: string }) {
   return httpPost<KnowledgeBaseItem[]>('/knowledge/bases/search', params)
+}
+
+/** 创建并绑定 Embedding 模型的知识库。 */
+export function createKnowledgeBase(payload: KnowledgeBaseCreatePayload) {
+  return httpPost<KnowledgeBaseItem>('/knowledge/bases/create', payload)
 }

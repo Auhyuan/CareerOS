@@ -75,7 +75,7 @@ async def search_knowledge_base(
     """检索当前 Agent 模板已挂载的知识库。
 
     知识库范围由系统从 Runtime Context 自动注入，模型只需要提供自然语言查询。
-    工具使用混合检索和可选 Rerank，检索证据不会直接塞进普通工具消息，
+    工具使用混合检索；Rerank 模型后续由调用配置明确指定，检索证据不会直接塞进普通工具消息，
     而是写入 LangGraph retrieval_context，并在下一轮模型调用前注入系统提示词。
 
     Args:
@@ -113,7 +113,7 @@ async def search_knowledge_base(
                 fetch_k=max(safe_top_k * 3, 10),
                 similarity_threshold=0.2,
             ),
-            rerank_config=RerankConfig(enable=True),
+            rerank_config=RerankConfig(enable=False),
         )
     )
 

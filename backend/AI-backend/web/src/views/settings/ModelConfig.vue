@@ -91,6 +91,17 @@
               <a-input v-model:value="form.model_name" placeholder="deepseek-chat" />
             </a-form-item>
           </a-col>
+          <a-col v-if="form.model_type === 'embedding'" :span="12">
+            <a-form-item label="向量维度" required>
+              <a-input-number
+                v-model:value="embeddingDimension"
+                :min="1"
+                :precision="0"
+                style="width: 100%"
+                placeholder="例如 1024"
+              />
+            </a-form-item>
+          </a-col>
         </a-row>
         <a-form-item label="base_url" required>
           <a-input v-model:value="form.base_url" placeholder="https://api.deepseek.com" />
@@ -152,6 +163,21 @@ const form = reactive<ModelConfigUpsertPayload>({
   enabled: true,
   description: '',
   extra_config: {},
+})
+
+const embeddingDimension = computed<number | undefined>({
+  /** 从模型扩展配置读取 Embedding 向量维度。 */
+  get() {
+    const value = form.extra_config?.dimension
+    return typeof value === 'number' ? value : undefined
+  },
+  /** 将向量维度写回模型扩展配置，供知识库创建时读取。 */
+  set(value) {
+    form.extra_config = {
+      ...(form.extra_config || {}),
+      dimension: value,
+    }
+  },
 })
 
 const columns = [
@@ -225,6 +251,10 @@ function openEdit(record: ModelConfigItem) {
 async function submitForm() {
   if (!form.model_code || !form.model_name || !form.base_url) {
     message.warning('请填写 model_code、model_name 和 base_url')
+    return
+  }
+  if (form.model_type === 'embedding' && !embeddingDimension.value) {
+    message.warning('Embedding 模型必须配置向量维度')
     return
   }
   await upsertModelConfig({

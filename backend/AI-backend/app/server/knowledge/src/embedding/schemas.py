@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class EmbeddingModelConfig(BaseModel):
     """单次向量化使用的模型配置。"""
 
-    model_name: str = Field(..., min_length=1, description="Embedding 模型名称")
+    model_code: str = Field(..., min_length=1, description="平台 Embedding 模型编码")
     dimension: int = Field(..., ge=1, description="模型预期向量维度")
 
 
@@ -39,7 +39,7 @@ class EmbeddingInput(BaseModel):
 class EmbeddingOutput(BaseModel):
     """临时向量化输出。"""
 
-    model_name: str = Field(..., description="实际使用的模型名称")
+    model_code: str = Field(..., description="实际使用的平台模型编码")
     dimension: int = Field(..., ge=1, description="实际向量维度")
     embedding: list[float] = Field(..., description="文本向量")
 
