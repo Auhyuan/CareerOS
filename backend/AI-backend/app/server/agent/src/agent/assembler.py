@@ -83,6 +83,7 @@ class AgentAssembler:
         features = AgentFeatureConfig(
             enable_memory=request.optional_features.long_term_memory_enabled,
             enable_planning=request.optional_features.planning_enabled,
+            enable_knowledge=request.optional_features.knowledge_enabled,
         )
         build_config = AgentBuildConfig(
             system_prompt=request.system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT,
@@ -92,10 +93,11 @@ class AgentAssembler:
             features=features,
         )
         logger.info(
-            "Agent 构建配置就绪: thread_id=%s memory=%s planning=%s",
+            "Agent 构建配置就绪: thread_id=%s memory=%s planning=%s knowledge=%s",
             context.thread_id,
             features.enable_memory,
             features.enable_planning,
+            features.enable_knowledge,
         )
 
         # 第二步：渲染系统提示词。
@@ -139,6 +141,15 @@ class AgentAssembler:
             for file_tool in [read_uploaded_file, search_uploaded_files]:
                 if getattr(file_tool, "name", "") not in existing_tool_names:
                     tools.append(file_tool)
+
+        # 第三步附加：知识库检索工具动态注入。
+        # 开关和知识库白名单均来自模板可选能力，模型不能通过 tools 参数绕过这层授权。
+        if features.enable_knowledge:
+            from app.server.agent.src.tools.knowledge_tools import search_knowledge_base
+
+            existing_tool_names = {getattr(tool, "name", tool.__class__.__name__) for tool in tools}
+            if search_knowledge_base.name not in existing_tool_names:
+                tools.append(search_knowledge_base)
 
         # 第三步附加：A2A 工具动态注入。仅 a2a.sub_agent_list 非空时装配 a2a_call 工具。
         # 子 Agent 元信息查询和 system prompt 注入由 A2AAgentContextMiddleware 负责。

@@ -1,13 +1,15 @@
 """Retrieval 使用的 Milvus 只读存储适配器。"""
 
 import asyncio
-import hashlib
 import json
 import re
 from collections import Counter
 from typing import Any
 
+from pymilvus import MilvusClient
+
 from app.server.knowledge.src.config import knowledge_config as settings
+from app.server.knowledge.src.milvus_client import milvus_client_manager
 from app.server.knowledge.src.retrieval.schemas import RetrievalChunk
 from app.server.knowledge.src.retrieval.exceptions import (
     RetrievalDependencyError,
@@ -32,14 +34,12 @@ class MilvusRetrievalStore:
     METADATA_HEADERS_MIN_SCORE = 0.3
 
     def __init__(self) -> None:
-        """初始化连接别名和并发连接锁。"""
-        alias_seed = hashlib.sha256(settings.milvus_uri.encode("utf-8")).hexdigest()[:8]
-        self.connection_alias = f"primitive_retrieval_{alias_seed}"
+        """初始化并发连接锁。"""
         self._connection_lock = asyncio.Lock()
 
     async def close(self) -> None:
-        """关闭当前原子服务建立的 Milvus 连接。"""
-        await asyncio.to_thread(self._disconnect_sync)
+        """关闭知识库模块共享的 MilvusClient。"""
+        await asyncio.to_thread(milvus_client_manager.close)
 
     async def health_check(self) -> str:
         """建立真实连接并确认目标 Milvus database 可用。"""
@@ -184,40 +184,39 @@ class MilvusRetrievalStore:
             ) from exc
 
     async def _ensure_connection(self) -> None:
-        """在并发锁内确保 Milvus 连接和 database 已准备完成。"""
+        """在并发锁内确保共享 MilvusClient 已准备完成。"""
         async with self._connection_lock:
             try:
                 await asyncio.wait_for(
-                    asyncio.to_thread(self._connect_sync),
+                    asyncio.to_thread(milvus_client_manager.get_client),
                     timeout=settings.milvus_connect_timeout,
                 )
             except TimeoutError as exc:
                 raise RetrievalDependencyError(
                     f"Milvus connect timeout after {settings.milvus_connect_timeout}s"
                 ) from exc
-            except RetrievalValidationError:
-                raise
             except Exception as exc:  # noqa: BLE001
                 raise RetrievalDependencyError(f"Milvus connection failed: {exc}") from exc
 
-    def _connect_sync(self) -> None:
-        """同步建立连接并切换 database，供工作线程执行。"""
-        from pymilvus import connections, db
+    @staticmethod
+    def _client() -> MilvusClient:
+        """获取已初始化或按需创建的共享客户端。"""
+        return milvus_client_manager.get_client()
 
-        if not connections.has_connection(self.connection_alias):
-            connections.connect(
-                alias=self.connection_alias,
-                uri=settings.milvus_uri,
-                token=settings.milvus_token or None,
-                timeout=settings.milvus_connect_timeout,
+    def _describe_collection(self, collection_name: str) -> dict[str, Any]:
+        """校验 Collection 存在并返回其 Schema 描述。"""
+        client = self._client()
+        if not client.has_collection(
+            collection_name=collection_name,
+            timeout=settings.milvus_connect_timeout,
+        ):
+            raise RetrievalNotFoundError(
+                f"Milvus collection not found: {collection_name}"
             )
-
-        databases = db.list_database(using=self.connection_alias)
-        if settings.milvus_database not in databases:
-            raise RetrievalValidationError(
-                f"Milvus database not found: {settings.milvus_database}"
-            )
-        db.using_database(settings.milvus_database, using=self.connection_alias)
+        return client.describe_collection(
+            collection_name=collection_name,
+            timeout=settings.milvus_query_timeout,
+        )
 
     def _vector_search_sync(
         self,
@@ -228,40 +227,39 @@ class MilvusRetrievalStore:
         similarity_threshold: float,
         file_ids: list[str],
     ) -> list[RetrievalChunk]:
-        """同步执行 Collection 校验、加载和向量搜索。"""
-        from pymilvus import Collection, utility
-
-        if not utility.has_collection(collection_name, using=self.connection_alias):
-            raise RetrievalNotFoundError(
-                f"Milvus collection not found: {collection_name}"
-            )
-
-        collection = Collection(name=collection_name, using=self.connection_alias)
-        self._validate_collection_schema(collection, len(query_vector))
-        # Retrieval 只加载已有 Collection，不创建 Collection、字段或索引。
-        collection.load(timeout=settings.milvus_query_timeout)
-
-        results = collection.search(
+        """使用 MilvusClient 执行 COSINE 向量检索。"""
+        client = self._client()
+        description = self._describe_collection(collection_name)
+        self._validate_collection_schema(description, len(query_vector))
+        client.load_collection(
+            collection_name=collection_name,
+            timeout=settings.milvus_query_timeout,
+        )
+        results = client.search(
+            collection_name=collection_name,
             data=[query_vector],
             anns_field="embedding",
-            param={
+            filter=self._build_file_filter(file_ids) or "",
+            limit=fetch_k,
+            output_fields=self._build_output_fields(description),
+            search_params={
                 "metric_type": "COSINE",
                 "params": {"nprobe": settings.milvus_nprobe},
             },
-            limit=fetch_k,
-            expr=self._build_file_filter(file_ids),
-            output_fields=self._build_output_fields(collection),
             timeout=settings.milvus_query_timeout,
         )
         hits = results[0] if results else []
-
         chunks: list[RetrievalChunk] = []
         for hit in hits:
-            # Milvus COSINE 的 distance 即相似度，值越大越相关，无需执行 1-distance。
-            score = float(hit.distance)
+            # COSINE distance 在当前 API 中就是相似度，值越大越相关。
+            score = float(hit.get("distance", 0.0))
             if score < similarity_threshold:
                 continue
-            chunks.append(self._build_chunk(hit=hit, score=score, collection_name=collection_name))
+            chunks.append(self._build_chunk(
+                hit=hit,
+                score=score,
+                collection_name=collection_name,
+            ))
             if len(chunks) >= top_k:
                 break
         return chunks
@@ -274,39 +272,26 @@ class MilvusRetrievalStore:
         top_k: int,
         file_ids: list[str],
     ) -> list[RetrievalChunk]:
-        """同步校验 Collection 并执行 TEXT_MATCH 查询。"""
-        from pymilvus import Collection, utility
-
-        if not utility.has_collection(collection_name, using=self.connection_alias):
-            raise RetrievalNotFoundError(
-                f"Milvus collection not found: {collection_name}"
-            )
-
-        collection = Collection(name=collection_name, using=self.connection_alias)
-        self._validate_keyword_collection_schema(collection)
-        collection.load(timeout=settings.milvus_query_timeout)
-
-        match_expression = self._build_keyword_expression(
-            query=query,
-            file_ids=file_ids,
-        )
-        results = collection.query(
-            expr=match_expression,
-            output_fields=self._build_output_fields(collection),
+        """使用 MilvusClient 的 TEXT_MATCH 执行关键词检索。"""
+        client = self._client()
+        description = self._describe_collection(collection_name)
+        self._validate_keyword_collection_schema(collection_name, description)
+        client.load_collection(collection_name=collection_name, timeout=settings.milvus_query_timeout)
+        results = client.query(
+            collection_name=collection_name,
+            filter=self._build_keyword_expression(query=query, file_ids=file_ids),
+            output_fields=self._build_output_fields(description),
             limit=fetch_k,
             timeout=settings.milvus_query_timeout,
         )
         chunks: list[RetrievalChunk] = []
         for rank, result in enumerate(results or []):
-            # TEXT_MATCH 没有相关性数值，因此这里明确返回排名分数，而非伪造相似度。
-            rank_score = 1.0 / (rank + 1)
-            chunks.append(
-                self._build_chunk_from_values(
-                    values=result,
-                    score=rank_score,
-                    collection_name=collection_name,
-                )
-            )
+            # TEXT_MATCH 不返回相关性数值，使用稳定排名分供后续 RRF 融合。
+            chunks.append(self._build_chunk_from_values(
+                values=result,
+                score=1.0 / (rank + 1),
+                collection_name=collection_name,
+            ))
             if len(chunks) >= top_k:
                 break
         return chunks
@@ -319,62 +304,33 @@ class MilvusRetrievalStore:
         scan_limit: int,
         file_ids: list[str],
     ) -> list[RetrievalChunk]:
-        """扫描 Milvus 中的 metadata.headers，并将命中记录转换为检索切片。"""
-        from pymilvus import Collection, utility
-
-        if not utility.has_collection(collection_name, using=self.connection_alias):
-            raise RetrievalNotFoundError(
-                f"Milvus collection not found: {collection_name}"
-            )
-
-        collection = Collection(name=collection_name, using=self.connection_alias)
-        schema_fields = {
-            field.name: field
-            for field in getattr(collection.schema, "fields", [])
-        }
-        missing_fields = self.BASE_REQUIRED_FIELDS - set(schema_fields)
-        if missing_fields:
-            raise RetrievalValidationError(
-                "Milvus collection schema mismatch, missing fields: "
-                f"{sorted(missing_fields)}"
-            )
-
-        if "metadata" not in schema_fields:
-            # Old collections do not have metadata yet; enhancement must not break normal retrieval.
+        """扫描 metadata.headers，并按标题覆盖率筛选相关切片。"""
+        client = self._client()
+        description = self._describe_collection(collection_name)
+        self._validate_base_collection_schema(description)
+        fields = self._schema_fields(description)
+        if "metadata" not in fields:
             return []
-
-        collection.load(timeout=settings.milvus_query_timeout)
-        query_expression = self._build_file_filter(file_ids) or "chunk_index >= 0"
-        results = collection.query(
-            expr=query_expression,
+        client.load_collection(collection_name=collection_name, timeout=settings.milvus_query_timeout)
+        results = client.query(
+            collection_name=collection_name,
+            filter=self._build_file_filter(file_ids) or "chunk_index >= 0",
             output_fields=[
-                "content",
-                "source",
-                "chunk_id",
-                "file_id",
-                "chunk_index",
-                "metadata",
+                "content", "source", "chunk_id", "file_id", "chunk_index", "metadata"
             ],
             limit=scan_limit,
             timeout=settings.milvus_query_timeout,
         )
         chunks: list[RetrievalChunk] = []
         for result in results or []:
-            # Only metadata.headers participates in this route; content is not used for matching here.
-            score = self._score_metadata_headers(
-                query=query,
-                metadata=result.get("metadata"),
-            )
+            score = self._score_metadata_headers(query=query, metadata=result.get("metadata"))
             if score < self.METADATA_HEADERS_MIN_SCORE:
                 continue
-            chunks.append(
-                self._build_chunk_from_values(
-                    values=result,
-                    score=score,
-                    collection_name=collection_name,
-                )
-            )
-
+            chunks.append(self._build_chunk_from_values(
+                values=result,
+                score=score,
+                collection_name=collection_name,
+            ))
         return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)[:fetch_k]
 
     def _query_chunks_by_file_sync(
@@ -383,23 +339,15 @@ class MilvusRetrievalStore:
         file_id: str,
         max_chunks: int,
     ) -> list[RetrievalChunk]:
-        """同步按 file_id 查询文档 Chunk，按 chunk_index 升序返回。"""
-        from pymilvus import Collection, utility
-
-        if not utility.has_collection(collection_name, using=self.connection_alias):
-            raise RetrievalNotFoundError(
-                f"Milvus collection not found: {collection_name}"
-            )
-
-        collection = Collection(name=collection_name, using=self.connection_alias)
-        self._validate_base_collection_schema(collection)
-        collection.load(timeout=settings.milvus_query_timeout)
-
-        # 使用 JSON 编码 file_id，避免引号或反斜线破坏 Milvus 表达式。
-        file_expression = f"file_id == {json.dumps(file_id, ensure_ascii=False)}"
-        results = collection.query(
-            expr=file_expression,
-            output_fields=self._build_output_fields(collection),
+        """按 file_id 查询文档切片，并按 chunk_index 升序返回。"""
+        client = self._client()
+        description = self._describe_collection(collection_name)
+        self._validate_base_collection_schema(description)
+        client.load_collection(collection_name=collection_name, timeout=settings.milvus_query_timeout)
+        results = client.query(
+            collection_name=collection_name,
+            filter=f"file_id == {json.dumps(file_id, ensure_ascii=False)}",
+            output_fields=self._build_output_fields(description),
             limit=max_chunks,
             timeout=settings.milvus_query_timeout,
         )
@@ -413,77 +361,67 @@ class MilvusRetrievalStore:
         ]
         return sorted(chunks, key=lambda chunk: chunk.chunk_index)
 
-    def _validate_collection_schema(self, collection: Any, vector_dimension: int) -> None:
-        """校验向量检索所需字段以及 Collection 向量维度。"""
-        schema_fields = {
-            field.name: field
-            for field in getattr(collection.schema, "fields", [])
+    @staticmethod
+    def _schema_fields(description: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """将 MilvusClient Schema 描述转换为按字段名索引的字典。"""
+        return {
+            field.get("name"): field
+            for field in description.get("fields", [])
+            if field.get("name")
         }
-        missing_fields = self.VECTOR_REQUIRED_FIELDS - set(schema_fields)
+
+    def _validate_collection_schema(
+        self, description: dict[str, Any], vector_dimension: int
+    ) -> None:
+        """校验向量检索字段和向量维度。"""
+        fields = self._schema_fields(description)
+        missing_fields = self.VECTOR_REQUIRED_FIELDS - set(fields)
         if missing_fields:
             raise RetrievalValidationError(
                 "Milvus collection schema mismatch, missing fields: "
                 f"{sorted(missing_fields)}"
             )
-
-        embedding_field = schema_fields["embedding"]
-        field_params = getattr(embedding_field, "params", None) or {}
-        collection_dimension = int(field_params.get("dim") or 0)
+        collection_dimension = int((fields["embedding"].get("params") or {}).get("dim") or 0)
         if not collection_dimension:
-            raise RetrievalValidationError(
-                "Milvus collection embedding dimension is unavailable"
-            )
+            raise RetrievalValidationError("Milvus collection embedding dimension is unavailable")
         if collection_dimension != vector_dimension:
             raise RetrievalValidationError(
                 "Milvus collection embedding dimension mismatch: "
                 f"collection={collection_dimension}, vector={vector_dimension}"
             )
 
-    def _validate_base_collection_schema(self, collection: Any) -> None:
-        """校验按 file_id 回查文档 Chunk 所需的基础字段。"""
-        schema_fields = {
-            field.name: field
-            for field in getattr(collection.schema, "fields", [])
-        }
-        missing_fields = self.BASE_REQUIRED_FIELDS - set(schema_fields)
+    def _validate_base_collection_schema(self, description: dict[str, Any]) -> None:
+        """校验文档切片回查所需的基础字段。"""
+        missing_fields = self.BASE_REQUIRED_FIELDS - set(self._schema_fields(description))
         if missing_fields:
             raise RetrievalValidationError(
                 "Milvus collection schema mismatch, missing fields: "
                 f"{sorted(missing_fields)}"
             )
 
-    def _validate_keyword_collection_schema(self, collection: Any) -> None:
-        """校验关键词检索所需字段、Match 能力和 content 索引。"""
-        schema_fields = {
-            field.name: field
-            for field in getattr(collection.schema, "fields", [])
-        }
-        missing_fields = self.BASE_REQUIRED_FIELDS - set(schema_fields)
-        if missing_fields:
-            raise RetrievalValidationError(
-                "Milvus collection schema mismatch, missing fields: "
-                f"{sorted(missing_fields)}"
-            )
-
-        content_field = schema_fields["content"]
-        field_params = getattr(content_field, "params", None) or {}
-        enable_match = (
-            getattr(content_field, "enable_match", None) is True
-            or str(field_params.get("enable_match", "")).lower() in {"true", "1"}
-        )
-        if not enable_match:
+    def _validate_keyword_collection_schema(
+        self, collection_name: str, description: dict[str, Any]
+    ) -> None:
+        """校验全文匹配字段能力和 content 索引。"""
+        self._validate_base_collection_schema(description)
+        content_params = self._schema_fields(description)["content"].get("params") or {}
+        if str(content_params.get("enable_match", "")).lower() not in {"true", "1"}:
             raise RetrievalValidationError(
                 "Milvus collection content field does not support TEXT_MATCH"
             )
 
+        client = self._client()
+        index_names = client.list_indexes(collection_name=collection_name)
         has_content_index = any(
-            getattr(index, "field_name", None) == "content"
-            for index in (getattr(collection, "indexes", None) or [])
+            client.describe_index(
+                collection_name=collection_name,
+                index_name=index_name,
+                timeout=settings.milvus_query_timeout,
+            ).get("field_name") == "content"
+            for index_name in index_names
         )
         if not has_content_index:
-            raise RetrievalValidationError(
-                "Milvus collection content index not found"
-            )
+            raise RetrievalValidationError("Milvus collection content index not found")
 
     @classmethod
     def _score_metadata_headers(cls, *, query: str, metadata: Any) -> float:
@@ -590,14 +528,11 @@ class MilvusRetrievalStore:
             for token in left_counter.keys() & right_counter.keys()
         )
 
-    @staticmethod
-    def _build_output_fields(collection: Any) -> list[str]:
-        """构建 output_fields，若 Collection schema 存在 metadata 字段则一并读取。"""
+    @classmethod
+    def _build_output_fields(cls, description: dict[str, Any]) -> list[str]:
+        """根据 Schema 构建检索返回字段列表。"""
         fields = ["content", "source", "chunk_id", "file_id", "chunk_index"]
-        schema_field_names = {
-            field.name for field in getattr(collection.schema, "fields", [])
-        }
-        if "metadata" in schema_field_names:
+        if "metadata" in cls._schema_fields(description):
             fields.append("metadata")
         return fields
 
@@ -631,14 +566,12 @@ class MilvusRetrievalStore:
 
     @staticmethod
     def _build_chunk(
-        *,
-        hit: Any,
-        score: float,
-        collection_name: str,
+        *, hit: dict[str, Any], score: float, collection_name: str
     ) -> RetrievalChunk:
-        """从 Milvus Hit 中提取并校验稳定 Chunk 字段。"""
+        """从 MilvusClient SearchResult 提取并校验稳定切片字段。"""
+        values = hit.get("entity") or hit
         return MilvusRetrievalStore._build_chunk_from_values(
-            values=hit.entity,
+            values=values,
             score=score,
             collection_name=collection_name,
         )
@@ -680,16 +613,5 @@ class MilvusRetrievalStore:
             raise RetrievalValidationError(
                 f"Milvus search result field type invalid: {exc}"
             ) from exc
-    def _disconnect_sync(self) -> None:
-        """同步断开 Milvus 连接。"""
-        try:
-            from pymilvus import connections
-
-            if connections.has_connection(self.connection_alias):
-                connections.disconnect(self.connection_alias)
-        except ImportError:
-            return
-
-
 # 模块级单例保证 Milvus 连接可跨请求复用。
 milvus_store = MilvusRetrievalStore()

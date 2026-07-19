@@ -44,7 +44,7 @@ class AgentTemplateConfig(BaseModel):
         Raises:
             ValueError: 发现系统内置工具时抛出。
         """
-        internal_tool_names = {"a2a_call", "set_task_plan", "update_task_step"}
+        internal_tool_names = {"a2a_call", "set_task_plan", "update_task_step", "search_knowledge_base"}
         cleaned_tools = [str(item or "").strip() for item in value if str(item or "").strip()]
         invalid_tools = [name for name in cleaned_tools if name in internal_tool_names]
         if invalid_tools:

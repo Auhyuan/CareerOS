@@ -9,6 +9,7 @@ from app.server.agent.src.mcp import MCPService
 from app.server.agent.src.tools.a2a_tool import a2a_call
 from app.server.agent.src.tools.base import AgentToolDefinition
 from app.server.agent.src.tools.file_tools import read_uploaded_file
+from app.server.agent.src.tools.knowledge_tools import search_knowledge_base
 from app.server.agent.src.tools.planning_tools import set_task_plan, update_task_step
 from app.server.agent.src.tools.registry import AgentToolRegistry
 from app.server.agent.src.tools.schemas import AgentToolInfo
@@ -54,6 +55,11 @@ class AgentToolService:
             description=read_uploaded_file.description or "读取本次请求中用户上传的单个文件内容。",
             callable_ref=read_uploaded_file,
         ))
+        self.registry.register(AgentToolDefinition(
+            name=search_knowledge_base.name,
+            description=search_knowledge_base.description or "检索本次 Agent 已挂载的知识库。",
+            callable_ref=search_knowledge_base,
+        ))
 
     def _build_args_schema(self, tool: Any) -> dict[str, Any]:
         """提取工具暴露给模型的参数 JSON Schema。
@@ -88,10 +94,19 @@ class AgentToolService:
         """
         is_planning_tool = definition.name in {set_task_plan.name, update_task_step.name}
         is_file_tool = definition.name == read_uploaded_file.name
+        is_knowledge_tool = definition.name == search_knowledge_base.name
         return AgentToolInfo(
             name=definition.name,
             description=definition.description,
-            group="planning" if is_planning_tool else ("file" if is_file_tool else "internal"),
+            group=(
+                "planning"
+                if is_planning_tool
+                else "file"
+                if is_file_tool
+                else "knowledge"
+                if is_knowledge_tool
+                else "internal"
+            ),
             invokable=False,
             template_selectable=False,
             activation_mode="feature",
@@ -100,6 +115,8 @@ class AgentToolService:
                 if is_planning_tool
                 else "附件读取工具会在 file_ids 非空时自动启用，不能配置到模板 tools，也不能在工具测试页直接调用。"
                 if is_file_tool
+                else "知识库检索工具只能通过 knowledge_enabled 自动启用，不能配置到模板 tools。"
+                if is_knowledge_tool
                 else "内置工具由系统能力开关自动挂载，不能配置到模板 tools。"
             ),
             args_schema=self._build_args_schema(definition.callable_ref),
@@ -219,6 +236,11 @@ class AgentToolService:
             raise BusinessException(
                 code=400,
                 msg="附件读取工具依赖本次 Agent 运行的 file_ids 白名单，请通过 /agent/messages 携带 file_ids 后由 Agent 调用。",
+            )
+        if cleaned_name == search_knowledge_base.name:
+            raise BusinessException(
+                code=400,
+                msg="知识库检索工具依赖 Agent 模板中的知识库白名单，请开启 knowledge_enabled 后由 Agent 调用。",
             )
         if not self.registry.has_tool(cleaned_name):
             if db is None:

@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.server.agent.src.schemas.context_summarization import ContextSummarizationConfig
 
@@ -58,6 +58,29 @@ class AgentOptionalFeatures(BaseModel):
         default=False,
         description="是否启用规划模式；开启后自动装配任务计划工具和规划中间件。",
     )
+    knowledge_enabled: bool = Field(
+        default=False,
+        description="是否挂载知识库检索能力；开启后自动装配内部知识库检索工具。",
+    )
+    knowledge_base_ids: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="本次 Agent 允许检索的知识库 ID 白名单；模型不能修改该范围。",
+    )
+
+    @field_validator("knowledge_base_ids")
+    @classmethod
+    def normalize_knowledge_base_ids(cls, values: list[str]) -> list[str]:
+        """清理知识库 ID，并按原顺序去重。"""
+        cleaned = [str(value or "").strip() for value in values if str(value or "").strip()]
+        return list(dict.fromkeys(cleaned))
+
+    @model_validator(mode="after")
+    def validate_knowledge_configuration(self) -> "AgentOptionalFeatures":
+        """确保启用知识库能力时已经配置至少一个知识库。"""
+        if self.knowledge_enabled and not self.knowledge_base_ids:
+            raise ValueError("开启 knowledge_enabled 后必须配置 knowledge_base_ids")
+        return self
 
 
 class AgentA2AConfig(BaseModel):

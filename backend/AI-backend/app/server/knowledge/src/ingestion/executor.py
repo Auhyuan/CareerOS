@@ -98,6 +98,9 @@ class IngestionExecutor:
                         vector_id=chunk_id,
                     )
                 )
+
+            # 整份文档写完后统一刷新，保证数据库提交成功时全部向量均已可检索。
+            await vector_store_service.flush_collection(knowledge.collection_name)
         except Exception:
             # 单个分块失败时，前面已经成功写入的向量不能留在可检索 Collection 中。
             await self._cleanup_file_vectors(knowledge.collection_name, run)

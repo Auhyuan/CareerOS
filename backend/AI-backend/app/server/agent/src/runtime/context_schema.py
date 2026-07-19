@@ -23,5 +23,7 @@ def create_agent_context_schema() -> type[BaseModel]:
         optional_features=(dict[str, Any], Field(default_factory=dict, description="本次运行开启的增强能力")),
         memory_enabled=(bool, Field(default=False, description="是否启用长期记忆")),
         planning_enabled=(bool, Field(default=False, description="是否启用规划模式")),
+        knowledge_enabled=(bool, Field(default=False, description="是否启用知识库检索")),
+        knowledge_base_ids=(list[str], Field(default_factory=list, description="允许访问的知识库 ID 白名单")),
         a2a_sub_agent_list=(list[str], Field(default_factory=list, description="本次 A2A 允许调用的子 Agent ID 列表")),
     )

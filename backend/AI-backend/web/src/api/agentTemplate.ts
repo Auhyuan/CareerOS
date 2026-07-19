@@ -18,6 +18,8 @@ export interface ModelRuntimeOptions {
 export interface AgentOptionalFeatures {
   long_term_memory_enabled?: boolean
   planning_enabled?: boolean
+  knowledge_enabled?: boolean
+  knowledge_base_ids?: string[]
 }
 
 /** 模板会话上下文总结配置；对象存在即启用该能力。 */

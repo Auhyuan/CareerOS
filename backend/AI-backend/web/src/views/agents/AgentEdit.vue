@@ -163,6 +163,22 @@
           <a-switch v-model:checked="form.config.optional_features!.planning_enabled" />
           <span class="text-gray-500 ml-2">开启后复杂任务会先生成任务计划，并等待用户确认</span>
         </a-form-item>
+        <a-form-item label="挂载知识库">
+          <a-switch v-model:checked="form.config.optional_features!.knowledge_enabled" />
+          <span class="text-gray-500 ml-2">开启后系统自动挂载知识库检索工具</span>
+        </a-form-item>
+        <a-form-item v-if="form.config.optional_features!.knowledge_enabled" label="可访问知识库">
+          <a-select
+            v-model:value="form.config.optional_features!.knowledge_base_ids"
+            mode="multiple"
+            placeholder="选择该 Agent 允许检索的知识库"
+            style="width: 100%"
+            :options="knowledgeBaseOptions"
+            show-search
+            option-filter-prop="label"
+            allow-clear
+          />
+        </a-form-item>
         <a-form-item label="可被 A2A 调用 (is_sub_agent)">
           <a-switch v-model:checked="form.config.is_sub_agent" />
           <span class="text-gray-500 ml-2">开启后其他 Agent 可通过 A2A 工具调用本 Agent</span>
@@ -200,6 +216,7 @@ import {
   upsertAgentTemplate,
 } from '@/api/agentTemplate'
 import { getCapabilities } from '@/api/capabilities'
+import { searchKnowledgeBases } from '@/api/knowledge'
 import { searchModelConfigs } from '@/api/modelConfigs'
 
 defineOptions({ name: 'AgentEditView' })
@@ -232,6 +249,8 @@ const form = reactive<AgentTemplate>({
     optional_features: {
       long_term_memory_enabled: false,
       planning_enabled: false,
+      knowledge_enabled: false,
+      knowledge_base_ids: [],
     },
     a2a: null,
     context_summarization: null,
@@ -264,6 +283,7 @@ const rules = {
 const toolOptions = ref<{ label: string; value: string }[]>([])
 const modelOptions = ref<{ label: string; value: string }[]>([])
 const subAgentOptions = ref<{ label: string; value: string }[]>([])
+const knowledgeBaseOptions = ref<{ label: string; value: string }[]>([])
 const a2aSubAgentList = ref<string[]>([])
 
 /** 加载下拉数据 */
@@ -273,6 +293,15 @@ async function loadOptions() {
     toolOptions.value = (cap.registered_tools || []).map((name) => ({ label: name, value: name }))
   } catch {
     toolOptions.value = []
+  }
+  try {
+    const knowledgeBases = await searchKnowledgeBases({ status: 'active' })
+    knowledgeBaseOptions.value = (knowledgeBases || []).map((item) => ({
+      label: item.name,
+      value: item.knowledge_id,
+    }))
+  } catch {
+    knowledgeBaseOptions.value = []
   }
   try {
     const modelPage = await searchModelConfigs({ page: 1, page_size: 100, model_type: 'chat', enabled: true })
@@ -324,6 +353,13 @@ async function onSubmit() {
     : null
   if (form.config.context_summarization && !form.config.context_summarization.model_code.trim()) {
     message.warning('请为会话上下文总结选择模型')
+    return
+  }
+  if (
+    form.config.optional_features?.knowledge_enabled
+    && !form.config.optional_features.knowledge_base_ids?.length
+  ) {
+    message.warning('开启知识库能力后，请至少选择一个知识库')
     return
   }
 

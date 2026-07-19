@@ -1,4 +1,4 @@
-"""Middleware that injects retrieval tool results into the next model call."""
+"""把检索工具写入的证据注入下一次模型调用。"""
 
 import logging
 import operator
@@ -16,57 +16,46 @@ logger = logging.getLogger(__name__)
 
 
 class RetrievalContextState(CareerAgentState, total=False):
-    """LangGraph state extension for retrieval context.
+    """声明检索上下文对应的 LangGraph state。
 
-    Retrieval tools write results through Command(update={"retrieval_context": [...]}). The operator.add
-    reducer allows multiple retrieval tool calls in one run to append context instead of overwriting it.
+    检索工具通过 Command(update={"retrieval_context": [...]}) 写入证据。
+    operator.add reducer 允许本次运行中的多次检索追加证据，而不是相互覆盖。
     """
 
     retrieval_context: NotRequired[Annotated[list[dict[str, str]], operator.add]]
 
 
 class InjectRetrievalContextMiddleware(AgentMiddleware[RetrievalContextState]):
-    """Inject current-run retrieval context into the system prompt before model calls.
+    """在模型调用前注入当前 Agent 运行产生的检索证据。
 
-    Checkpoint keeps state by thread_id. Because retrieval_context is temporary material for one Agent run,
-    every item must carry run_id. This middleware only injects items whose run_id matches the current runtime
-    context, preventing old retrieval results from polluting later user questions in the same conversation.
+    Checkpointer 会按照 thread_id 持久化 state，因此 retrieval_context 中的每项证据
+    必须携带 run_id。中间件只注入当前 run_id 的内容，避免同一会话上一轮检索结果
+    污染后续用户问题。
     """
 
     state_schema = RetrievalContextState
 
     def __init__(self, enabled: bool = True):
-        """Initialize the retrieval context middleware.
+        """初始化检索上下文中间件。
 
         Args:
-            enabled: Whether retrieval context injection is enabled.
+            enabled: 是否启用检索证据注入。
         """
         self.enabled = enabled
 
     def _get_current_run_id(self, request: ModelRequest) -> str:
-        """Read the current run_id from LangChain runtime context.
-
-        Args:
-            request: LangChain model request.
-
-        Returns:
-            Current Agent run ID. Returns an empty string when unavailable.
-        """
+        """从 LangChain Runtime Context 读取当前 run_id。"""
         context = getattr(request.runtime, "context", None)
         if isinstance(context, dict):
             return str(context.get("run_id") or "")
         return str(getattr(context, "run_id", "") or "")
 
-    def _filter_current_run_context(self, retrieval_context: object, current_run_id: str) -> list[str]:
-        """Keep only retrieval context written by the current Agent run.
-
-        Args:
-            retrieval_context: Raw retrieval_context state value.
-            current_run_id: Current Agent run ID.
-
-        Returns:
-            Retrieval context strings that can be injected into the system prompt.
-        """
+    def _filter_current_run_context(
+        self,
+        retrieval_context: object,
+        current_run_id: str,
+    ) -> list[str]:
+        """过滤并返回只属于当前 Agent 运行的检索证据。"""
         if not isinstance(retrieval_context, list):
             return []
 
@@ -86,22 +75,17 @@ class InjectRetrievalContextMiddleware(AgentMiddleware[RetrievalContextState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        """Inject retrieval context before every model call.
-
-        Args:
-            request: LangChain model request.
-            handler: Next model-call handler.
-
-        Returns:
-            Model response. When no current-run retrieval context exists, the request is passed through unchanged.
-        """
+        """在每次异步模型调用前，把当前运行的检索证据追加到系统提示词末尾。"""
         if not self.enabled:
             return await handler(request)
 
-        # retrieval_context is stored in checkpoint state, so it must be filtered by run_id before injection.
+        # 检索结果可能被 Checkpointer 保留，因此注入前必须按本次 run_id 隔离。
         current_run_id = self._get_current_run_id(request)
         retrieval_context = (request.state or {}).get("retrieval_context", [])
-        retrieval_context_items = self._filter_current_run_context(retrieval_context, current_run_id)
+        retrieval_context_items = self._filter_current_run_context(
+            retrieval_context,
+            current_run_id,
+        )
         if not retrieval_context_items:
             return await handler(request)
 
@@ -111,13 +95,12 @@ class InjectRetrievalContextMiddleware(AgentMiddleware[RetrievalContextState]):
             len(retrieval_context_items),
         )
 
-        # Put retrieval material at the end of the system prompt so the base prompt keeps its priority and shape.
+        # 证据放在基础系统提示词末尾，既不改变模板主体，也能让模型在下一轮读取检索内容。
         joined_context = "\n\n---\n\n".join(retrieval_context_items)
         inserted = (
             "\n\n<retrieval_context>\n"
             f"{joined_context}\n\n"
-            "Instruction: Use the retrieval context above when it is relevant. "
-            "If the retrieved content is insufficient, say so honestly.\n"
+            "请仅在相关时使用以上检索证据；如果证据不足，请如实说明，不得编造。\n"
             "</retrieval_context>"
         )
         current_prompt = getattr(request.system_message, "content", "")

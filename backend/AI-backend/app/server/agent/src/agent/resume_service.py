@@ -122,6 +122,8 @@ class AgentResumeService:
             optional_features=resolved_request.optional_features.model_dump(mode="python"),
             memory_enabled=resolved_request.optional_features.long_term_memory_enabled,
             planning_enabled=resolved_request.optional_features.planning_enabled,
+            knowledge_enabled=resolved_request.optional_features.knowledge_enabled,
+            knowledge_base_ids=resolved_request.optional_features.knowledge_base_ids,
             a2a_sub_agent_list=a2a_sub_agent_list,
         )
 
