@@ -36,7 +36,7 @@ POSTGRES_CONFIG = {
 }
 
 postgres_connection_string = URL.create(
-    "postgresql+psycopg2",
+    "postgresql+psycopg",
     username=POSTGRES_CONFIG["username"],
     password=POSTGRES_CONFIG["password"],
     host=POSTGRES_CONFIG["host"],

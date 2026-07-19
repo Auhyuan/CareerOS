@@ -59,7 +59,7 @@ class AgentCheckpointConfig:
         生成 LangGraph PostgreSQL checkpointer 使用的标准 PostgreSQL 连接串。
 
         Returns:
-            标准 postgresql:// 连接串。注意这里不能使用 SQLAlchemy 的 postgresql+psycopg2://。
+            标准 postgresql:// 连接串。注意这里不能使用 SQLAlchemy 的 postgresql+psycopg://。
         """
         encoded_user = urllib.parse.quote_plus(self.username)
         encoded_pwd = urllib.parse.quote_plus(self.password)
