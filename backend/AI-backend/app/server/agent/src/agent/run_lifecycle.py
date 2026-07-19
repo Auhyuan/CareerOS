@@ -195,6 +195,7 @@ class AgentRunLifecycleService:
                     "system_prompt": request.system_prompt,
                     "tools": request.tools,
                     "optional_features": request.optional_features.model_dump(mode="python"),
+                    "knowledge": request.knowledge.model_dump(mode="python") if request.knowledge else None,
                     "a2a": request.a2a.model_dump(mode="python") if request.a2a else None,
                     "a2a_sub_agent_list": request.a2a.sub_agent_list if request.a2a else [],
                     "context_summarization": (

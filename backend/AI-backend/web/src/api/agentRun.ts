@@ -71,8 +71,8 @@ export interface AgentRunRequestPayload {
     long_term_memory_enabled?: boolean
     planning_enabled?: boolean
     knowledge_enabled?: boolean
-    knowledge_base_ids?: string[]
   }
+  knowledge?: { knowledge_base_ids?: string[] } | null
   a2a?: { sub_agent_list?: string[] } | null
   runtime_options?: {
     model_code?: string | null

@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.server.agent.src.schemas.context_summarization import ContextSummarizationConfig
 
@@ -60,12 +60,17 @@ class AgentOptionalFeatures(BaseModel):
     )
     knowledge_enabled: bool = Field(
         default=False,
-        description="是否挂载知识库检索能力；开启后自动装配内部知识库检索工具。",
+        description="模板是否具备知识库检索能力；具体知识库白名单由每次调用的 knowledge 参数提供。",
     )
+
+
+class AgentKnowledgeConfig(BaseModel):
+    """Agent 单次运行可访问的知识库范围。"""
+
     knowledge_base_ids: list[str] = Field(
         default_factory=list,
         max_length=20,
-        description="本次 Agent 允许检索的知识库 ID 白名单；模型不能修改该范围。",
+        description="本次运行允许检索的知识库 ID 白名单；模型不能修改该范围。",
     )
 
     @field_validator("knowledge_base_ids")
@@ -74,13 +79,6 @@ class AgentOptionalFeatures(BaseModel):
         """清理知识库 ID，并按原顺序去重。"""
         cleaned = [str(value or "").strip() for value in values if str(value or "").strip()]
         return list(dict.fromkeys(cleaned))
-
-    @model_validator(mode="after")
-    def validate_knowledge_configuration(self) -> "AgentOptionalFeatures":
-        """确保启用知识库能力时已经配置至少一个知识库。"""
-        if self.knowledge_enabled and not self.knowledge_base_ids:
-            raise ValueError("开启 knowledge_enabled 后必须配置 knowledge_base_ids")
-        return self
 
 
 class AgentA2AConfig(BaseModel):
@@ -129,6 +127,10 @@ class AgentRunRequest(BaseModel):
     optional_features: AgentOptionalFeatures = Field(
         default_factory=AgentOptionalFeatures,
         description="本次运行可选增强能力。",
+    )
+    knowledge: AgentKnowledgeConfig | None = Field(
+        default=None,
+        description="本次运行允许访问的知识库范围；仅在模板开启知识库能力时生效。",
     )
     a2a: AgentA2AConfig | None = Field(default=None, description="A2A 调用配置。")
     context_summarization: ContextSummarizationConfig | None = Field(
@@ -187,6 +189,10 @@ class AgentMessageRequest(BaseModel):
     optional_features: AgentOptionalFeatures = Field(
         default_factory=AgentOptionalFeatures,
         description="新任务运行时可选增强能力。",
+    )
+    knowledge: AgentKnowledgeConfig | None = Field(
+        default=None,
+        description="新任务运行时允许访问的知识库范围。",
     )
     a2a: AgentA2AConfig | None = Field(default=None, description="新任务运行时的 A2A 调用配置。")
     runtime_options: ModelRuntimeOptions = Field(

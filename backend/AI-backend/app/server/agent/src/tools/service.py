@@ -115,7 +115,7 @@ class AgentToolService:
                 if is_planning_tool
                 else "附件读取工具会在 file_ids 非空时自动启用，不能配置到模板 tools，也不能在工具测试页直接调用。"
                 if is_file_tool
-                else "知识库检索工具只能通过 knowledge_enabled 自动启用，不能配置到模板 tools。"
+                else "知识库检索工具由模板 knowledge_enabled 和本次调用 knowledge 白名单共同启用，不能配置到模板 tools。"
                 if is_knowledge_tool
                 else "内置工具由系统能力开关自动挂载，不能配置到模板 tools。"
             ),
@@ -240,7 +240,7 @@ class AgentToolService:
         if cleaned_name == search_knowledge_base.name:
             raise BusinessException(
                 code=400,
-                msg="知识库检索工具依赖 Agent 模板中的知识库白名单，请开启 knowledge_enabled 后由 Agent 调用。",
+                msg="知识库检索工具依赖模板 knowledge_enabled 和本次调用的 knowledge.knowledge_base_ids。",
             )
         if not self.registry.has_tool(cleaned_name):
             if db is None:

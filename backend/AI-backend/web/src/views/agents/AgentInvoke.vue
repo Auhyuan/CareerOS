@@ -305,6 +305,21 @@
 
     <!-- 输入区 -->
     <div class="input-area">
+      <div v-if="knowledgeEnabled" class="knowledge-scope">
+        <span class="knowledge-scope-label">本次可访问知识库</span>
+        <a-select
+          v-model:value="selectedKnowledgeBaseIds"
+          mode="multiple"
+          placeholder="选择本次对话允许检索的知识库"
+          :options="knowledgeBaseOptions"
+          :disabled="running"
+          :max-tag-count="3"
+          show-search
+          option-filter-prop="label"
+          allow-clear
+          class="knowledge-scope-select"
+        />
+      </div>
       <div v-if="uploadedFiles.length || uploadingFiles" class="attachment-tray">
         <a-spin v-if="uploadingFiles" size="small" />
         <span v-if="uploadingFiles" class="attachment-uploading">正在上传并解析附件...</span>
@@ -382,6 +397,7 @@ import {
   type AgentTemplate,
 } from '@/api/agentTemplate'
 import { runAgentStream } from '@/api/agentRun'
+import { searchKnowledgeBases } from '@/api/knowledge'
 import { deleteAgentFiles, uploadAgentFiles, type UploadedFileView } from '@/api/file'
 import MarkdownView from '@/components/MarkdownView.vue'
 
@@ -406,6 +422,8 @@ const running = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploadingFiles = ref(false)
 const uploadedFiles = ref<UploadedFileView[]>([])
+const knowledgeBaseOptions = ref<{ label: string; value: string }[]>([])
+const selectedKnowledgeBaseIds = ref<string[]>([])
 
 /** Agent 流式展示块,用于按事件到达顺序渲染思考、工具调用、任务计划、中断确认和正式回复。 */
 type StreamBlock = ReasoningBlock | ContentBlock | ToolCallBlock | TaskPlanBlock | InterruptBlock | ContextSummaryBlock
@@ -518,6 +536,11 @@ const waitingFirstToken = computed(() => {
 /** 是否存在等待用户处理的任务计划确认卡片。 */
 const waitingPlanConfirmation = computed(() => findWaitingPlanInterrupt() !== null)
 
+/** 当前模板是否声明了知识库检索能力。 */
+const knowledgeEnabled = computed(
+  () => !!agentDetail.value?.config?.optional_features?.knowledge_enabled,
+)
+
 /** 输入框是否禁用：运行中、未选 Agent 或存在待确认卡片时都不允许输入新对话。 */
 const inputDisabled = computed(() => running.value || !selectedAgentId.value || waitingPlanConfirmation.value)
 
@@ -589,6 +612,19 @@ async function loadAgentList() {
   }
 }
 
+/** 加载运行时可选择的知识库列表。 */
+async function loadKnowledgeBaseOptions() {
+  try {
+    const knowledgeBases = await searchKnowledgeBases({ status: 'active' })
+    knowledgeBaseOptions.value = (knowledgeBases || []).map((item) => ({
+      label: item.name,
+      value: item.knowledge_id,
+    }))
+  } catch {
+    knowledgeBaseOptions.value = []
+  }
+}
+
 /** 加载选中的 Agent 详情 */
 async function loadAgentDetail(agentId: string) {
   if (!agentId) {
@@ -599,6 +635,9 @@ async function loadAgentDetail(agentId: string) {
   try {
     agentDetail.value = await getAgentTemplateDetail(agentId)
     agentName.value = agentDetail.value?.agent_name || agentId
+    if (!agentDetail.value?.config?.optional_features?.knowledge_enabled) {
+      selectedKnowledgeBaseIds.value = []
+    }
   } catch {
     agentName.value = agentId
   }
@@ -610,6 +649,7 @@ function onAgentChange(agentId: string) {
   messages.value = []
   input.value = ''
   uploadedFiles.value = []
+  selectedKnowledgeBaseIds.value = []
   stickToBottom.value = true
   if (!conversationId.value) {
     conversationId.value = uuid()
@@ -1425,6 +1465,9 @@ async function onRun() {
       message_type: 'text',
       payload: {},
       file_ids: currentFiles.map((file) => file.file_id),
+      knowledge: selectedKnowledgeBaseIds.value.length
+        ? { knowledge_base_ids: [...selectedKnowledgeBaseIds.value] }
+        : null,
     })
   } catch (e) {
     running.value = false
@@ -1475,7 +1518,7 @@ async function submitPlanConfirmation(messageIndex: number, blockIndex: number, 
 }
 
 onMounted(async () => {
-  await loadAgentList()
+  await Promise.all([loadAgentList(), loadKnowledgeBaseOptions()])
   const queryAgentId = route.query.agent_id as string
   if (queryAgentId) {
     selectedAgentId.value = queryAgentId
@@ -2278,6 +2321,22 @@ onMounted(async () => {
   backdrop-filter: blur(12px);
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   z-index: 10;
+}
+.knowledge-scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 860px;
+  margin: 0 auto 8px;
+}
+.knowledge-scope-label {
+  flex: 0 0 auto;
+  color: #595959;
+  font-size: 12px;
+}
+.knowledge-scope-select {
+  flex: 1;
+  min-width: 0;
 }
 .input-wrap {
   display: flex;

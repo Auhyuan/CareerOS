@@ -11,7 +11,14 @@ from app.server.agent.src.context import AgentContextService
 from app.server.agent.src.memory import AgentMemoryService
 from app.server.agent.src.runtime import AgentRuntimeContext
 from app.server.agent.src.runs import AgentRunService
-from app.server.agent.src.schemas.request import AgentA2AConfig, AgentOptionalFeatures, AgentResumeRequest, AgentRunRequest, ModelRuntimeOptions
+from app.server.agent.src.schemas.request import (
+    AgentA2AConfig,
+    AgentKnowledgeConfig,
+    AgentOptionalFeatures,
+    AgentResumeRequest,
+    AgentRunRequest,
+    ModelRuntimeOptions,
+)
 from app.server.agent.src.schemas.response import AgentRunResponse
 from app.server.agent.src.config import get_agent_runtime_settings
 
@@ -88,6 +95,11 @@ class AgentResumeService:
             file_ids=[],
             tools=list(metadata.get("tools") or []),
             optional_features=AgentOptionalFeatures(**optional_features_data),
+            knowledge=(
+                AgentKnowledgeConfig(**metadata["knowledge"])
+                if isinstance(metadata.get("knowledge"), dict)
+                else None
+            ),
             a2a=AgentA2AConfig(**a2a_data) if isinstance(a2a_data, dict) else None,
             context_summarization=metadata.get("context_summarization"),
             runtime_options=ModelRuntimeOptions(**runtime_options_data),
@@ -123,7 +135,11 @@ class AgentResumeService:
             memory_enabled=resolved_request.optional_features.long_term_memory_enabled,
             planning_enabled=resolved_request.optional_features.planning_enabled,
             knowledge_enabled=resolved_request.optional_features.knowledge_enabled,
-            knowledge_base_ids=resolved_request.optional_features.knowledge_base_ids,
+            knowledge_base_ids=(
+                resolved_request.knowledge.knowledge_base_ids
+                if resolved_request.knowledge
+                else []
+            ),
             a2a_sub_agent_list=a2a_sub_agent_list,
         )
 

@@ -130,6 +130,7 @@ class AgentMessageService:
             file_ids=request.file_ids,
             tools=request.tools,
             optional_features=request.optional_features,
+            knowledge=request.knowledge,
             a2a=request.a2a,
             runtime_options=request.runtime_options,
         )

@@ -71,6 +71,20 @@
                 allow-clear
               />
             </div>
+            <div v-if="agentDetail?.config?.optional_features?.knowledge_enabled">
+              <label>本次可访问知识库</label>
+              <a-select
+                v-model:value="selectedKnowledgeBaseIds"
+                mode="multiple"
+                size="small"
+                placeholder="选择本次试跑允许检索的知识库"
+                :options="knowledgeBaseOptions"
+                style="width: 100%"
+                show-search
+                option-filter-prop="label"
+                allow-clear
+              />
+            </div>
             <div>
               <a-checkbox v-model:checked="stream">流式输出</a-checkbox>
               <a-checkbox v-model:checked="memoryEnabled">长期记忆</a-checkbox>
@@ -348,6 +362,7 @@ import {
   type AgentTemplate,
 } from '@/api/agentTemplate'
 import { getCapabilities } from '@/api/capabilities'
+import { searchKnowledgeBases } from '@/api/knowledge'
 import { runAgent, runAgentStream, type AgentRunRequestPayload } from '@/api/agentRun'
 
 defineOptions({ name: 'AgentPlaygroundView' })
@@ -362,6 +377,8 @@ const agentDetail = ref<AgentTemplate | null>(null)
 
 // 工具选项
 const toolOptions = ref<{ label: string; value: string }[]>([])
+const knowledgeBaseOptions = ref<{ label: string; value: string }[]>([])
+const selectedKnowledgeBaseIds = ref<string[]>([])
 
 // 运行参数
 const conversationId = ref<string>('')
@@ -440,9 +457,23 @@ async function loadAll() {
     }
     const cap = await getCapabilities()
     toolOptions.value = (cap.registered_tools || []).map((name) => ({ label: name, value: name }))
+    await loadKnowledgeBaseOptions()
     if (!conversationId.value) conversationId.value = uuid()
   } finally {
     loading.value = false
+  }
+}
+
+/** 加载本次试跑可选择的知识库，失败时不影响 Agent 基础试跑能力。 */
+async function loadKnowledgeBaseOptions() {
+  try {
+    const knowledgeBases = await searchKnowledgeBases({ status: 'active' })
+    knowledgeBaseOptions.value = (knowledgeBases || []).map((item) => ({
+      label: item.name,
+      value: item.knowledge_id,
+    }))
+  } catch {
+    knowledgeBaseOptions.value = []
   }
 }
 
@@ -466,6 +497,9 @@ async function onRun() {
     optional_features: {
       long_term_memory_enabled: memoryEnabled.value,
     },
+    knowledge: selectedKnowledgeBaseIds.value.length
+      ? { knowledge_base_ids: [...selectedKnowledgeBaseIds.value] }
+      : null,
     a2a: a2aEnabled.value ? undefined : null,
   }
 

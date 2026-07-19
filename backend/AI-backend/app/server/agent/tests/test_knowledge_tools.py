@@ -4,11 +4,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from pydantic import ValidationError
-
 from app.server.agent.src.agent.assembler import AgentAssembler
+from app.server.agent.src.agent.message_service import AgentMessageService
 from app.server.agent.src.runtime.context import AgentRuntimeContext
 from app.server.agent.src.schemas.request import (
+    AgentKnowledgeConfig,
+    AgentMessageRequest,
     AgentOptionalFeatures,
     AgentRunRequest,
     ModelRuntimeOptions,
@@ -22,19 +23,36 @@ class AgentKnowledgeToolTestCase(unittest.IsolatedAsyncioTestCase):
 
     def test_knowledge_base_ids_are_normalized(self) -> None:
         """知识库 ID 应清理空白、去除空值并保持顺序去重。"""
-        features = AgentOptionalFeatures(
-            knowledge_enabled=True,
+        knowledge = AgentKnowledgeConfig(
             knowledge_base_ids=[" kb_one ", "", "kb_one", "kb_two"],
         )
-        self.assertEqual(features.knowledge_base_ids, ["kb_one", "kb_two"])
+        self.assertEqual(knowledge.knowledge_base_ids, ["kb_one", "kb_two"])
 
-    def test_enabled_knowledge_requires_base_ids(self) -> None:
-        """启用知识库能力但未选择知识库时应立即拒绝配置。"""
-        with self.assertRaises(ValidationError):
-            AgentOptionalFeatures(knowledge_enabled=True)
+    def test_template_capability_does_not_require_runtime_scope(self) -> None:
+        """模板可以只声明知识库能力，不保存任何知识库访问范围。"""
+        features = AgentOptionalFeatures(knowledge_enabled=True)
+        self.assertTrue(features.knowledge_enabled)
 
-    async def test_assembler_injects_knowledge_tool_only_when_enabled(self) -> None:
-        """知识库开关开启时，组装器应自动加入内部检索工具。"""
+    def test_message_entry_forwards_runtime_knowledge_scope(self) -> None:
+        """统一消息入口必须把本次知识库白名单传给底层运行请求。"""
+        message_service = AgentMessageService(
+            agent_service=MagicMock(),
+            run_service=MagicMock(),
+        )
+        request = AgentMessageRequest(
+            agent_id="agent-one",
+            message="查询知识",
+            knowledge=AgentKnowledgeConfig(knowledge_base_ids=["kb_one"]),
+        )
+
+        run_request = message_service._build_run_request(request, stream=True)
+
+        self.assertIsNotNone(run_request.knowledge)
+        self.assertEqual(run_request.knowledge.knowledge_base_ids, ["kb_one"])
+        self.assertTrue(run_request.stream)
+
+    async def test_assembler_requires_capability_and_runtime_scope(self) -> None:
+        """只有模板启用能力且本次传入知识库范围时才挂载检索工具。"""
         model_service = MagicMock()
         model_service.create_chat_model.return_value = MagicMock()
         tool_service = MagicMock()
@@ -59,10 +77,8 @@ class AgentKnowledgeToolTestCase(unittest.IsolatedAsyncioTestCase):
         )
         request = AgentRunRequest(
             query="查询知识",
-            optional_features=AgentOptionalFeatures(
-                knowledge_enabled=True,
-                knowledge_base_ids=["kb_one"],
-            ),
+            optional_features=AgentOptionalFeatures(knowledge_enabled=True),
+            knowledge=AgentKnowledgeConfig(knowledge_base_ids=["kb_one"]),
             runtime_options=ModelRuntimeOptions(model_code="chat-main"),
         )
         context = AgentRuntimeContext(
@@ -76,12 +92,18 @@ class AgentKnowledgeToolTestCase(unittest.IsolatedAsyncioTestCase):
             return_value=MagicMock(),
         ) as create_agent_mock:
             await assembler.assemble(request, context)
+            await assembler.assemble(
+                request,
+                context.model_copy(update={"knowledge_base_ids": []}),
+            )
 
-        tools = create_agent_mock.call_args.kwargs["tools"]
+        scoped_tools = create_agent_mock.call_args_list[0].kwargs["tools"]
         self.assertEqual(
-            [getattr(tool, "name", "") for tool in tools],
+            [getattr(tool, "name", "") for tool in scoped_tools],
             ["search_knowledge_base"],
         )
+        unscoped_tools = create_agent_mock.call_args_list[1].kwargs["tools"]
+        self.assertEqual(unscoped_tools, [])
 
     async def test_search_writes_current_run_retrieval_context(self) -> None:
         """检索成功后应把证据写入当前 run_id 对应的 retrieval_context。"""

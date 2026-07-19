@@ -113,7 +113,8 @@ class AgentAssembler:
         )
 
         # 第三步：按工具白名单加载本次可用工具。
-        tools = await self.tool_service.get_tools(build_config.tool_names, db=db)
+        # 复制工具列表，避免动态追加内置工具时污染 ToolService 的缓存对象。
+        tools = list(await self.tool_service.get_tools(build_config.tool_names, db=db))
         logger.info(
             "工具加载完成: thread_id=%s requested=%d loaded=%d names=%s",
             context.thread_id,
@@ -143,8 +144,8 @@ class AgentAssembler:
                     tools.append(file_tool)
 
         # 第三步附加：知识库检索工具动态注入。
-        # 开关和知识库白名单均来自模板可选能力，模型不能通过 tools 参数绕过这层授权。
-        if features.enable_knowledge:
+        # 模板负责声明能力，本次调用的 knowledge 参数负责提供访问白名单；二者同时满足才装配。
+        if features.enable_knowledge and context.knowledge_base_ids:
             from app.server.agent.src.tools.knowledge_tools import search_knowledge_base
 
             existing_tool_names = {getattr(tool, "name", tool.__class__.__name__) for tool in tools}

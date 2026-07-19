@@ -4,48 +4,62 @@
 
 知识库检索属于 AI-backend 内部基础能力，不是 MCP 外部工具。
 
-模板的 `tools` 字段继续只保存 MCP 工具编码。知识库能力由模板
-`optional_features.knowledge_enabled` 控制，系统在 Agent 组装阶段自动挂载
-`search_knowledge_base`。
+模板的 `tools` 字段继续只保存 MCP 工具编码。模板只通过
+`optional_features.knowledge_enabled` 声明 Agent 是否具备知识库检索能力，
+具体允许访问哪些知识库由每次调用的 `knowledge.knowledge_base_ids` 决定。
 
 ## 2. 模板配置
 
 ```json
 {
   "optional_features": {
-    "knowledge_enabled": true,
-    "knowledge_base_ids": [
-      "kb_xxx"
-    ]
+    "knowledge_enabled": true
   }
 }
 ```
 
-- `knowledge_enabled=false`：不向 Agent 注入知识库检索工具。
-- `knowledge_enabled=true`：自动注入内部工具。
-- `knowledge_base_ids`：Agent 允许访问的知识库白名单，最多 20 个。
-- 开启能力后必须至少配置一个知识库。
+模板不保存知识库 ID。历史模板中的 `optional_features.knowledge_base_ids`
+会在读取或再次保存时被清理。
 
-模型不能传入或修改知识库 ID。白名单会被写入 LangChain Runtime Context，
-工具执行时从可信上下文读取。
+## 3. 运行配置
 
-## 3. 执行链路
+调用 `/agent/messages` 时传入本次运行的访问白名单：
 
-```text
-Agent 模板
-  -> AgentRunLifecycleService 解析模板
-  -> AgentRuntimeContext 保存知识库白名单
-  -> AgentAssembler 检查 knowledge_enabled
-  -> 自动挂载 search_knowledge_base
-  -> 模型传入 query 和 top_k
-  -> 工具把 knowledge_base_ids 映射为 Milvus Collection
-  -> 执行 Hybrid 检索和可选 Rerank
-  -> Command 写入 retrieval_context
-  -> InjectRetrievalContextMiddleware 按 run_id 过滤
-  -> 下一轮模型从系统提示词读取检索证据
+```json
+{
+  "agent_id": "orchestrator-agent",
+  "conversation_id": "conv_xxx",
+  "message": "查询知识库中的岗位信息",
+  "knowledge": {
+    "knowledge_base_ids": ["kb_job", "kb_skill"]
+  }
+}
 ```
 
-## 4. 工具参数
+装配规则：
+
+1. 模板未开启 `knowledge_enabled`：即使请求传入知识库 ID，也不装配检索工具。
+2. 模板已开启，但本次没有知识库 ID：不装配检索工具。
+3. 模板已开启且本次提供知识库 ID：装配 `search_knowledge_base`。
+4. 知识库 ID 最多 20 个，后端会清理空值并按顺序去重。
+
+## 4. 执行链路
+
+```text
+Agent 模板 knowledge_enabled
+  + 本次调用 knowledge.knowledge_base_ids
+  -> AgentRunLifecycleService 解析模板，保留运行时访问范围
+  -> AgentRuntimeContext 保存知识库白名单
+  -> AgentAssembler 执行双重条件检查
+  -> 自动挂载 search_knowledge_base
+  -> 模型只传 query 和 top_k
+  -> 工具从 ToolRuntime 读取 knowledge_base_ids
+  -> 映射为 Milvus Collection 并执行 Hybrid 检索和可选 Rerank
+  -> Command 写入 retrieval_context
+  -> InjectRetrievalContextMiddleware 按 run_id 注入检索证据
+```
+
+## 5. 工具参数
 
 模型能看到的参数只有：
 
@@ -57,17 +71,17 @@ Agent 模板
 ```
 
 `ToolRuntime`、`knowledge_base_ids`、`run_id` 都由 LangGraph 和平台自动注入，
-不会暴露为模型工具参数。
+模型无法修改访问白名单。
 
-## 5. 上下文隔离
+## 6. 中断与 A2A
 
-检索结果写入 LangGraph state 时携带当前 `run_id`。同一个 `conversation_id`
-可以跨轮保留 Checkpoint，但中间件只读取当前运行的检索证据，因此上一轮知识库
-结果不会污染下一轮对话。
+- Agent 中断时，运行记录会保存 `knowledge` 配置；恢复后继续使用原来的白名单。
+- A2A 子 Agent 只能继承父运行已经授权的知识库 ID，不能扩大访问范围。
+- 子 Agent 模板同样必须开启 `knowledge_enabled`，否则不会装配检索工具。
 
-## 6. 前端配置
+## 7. 前端职责
 
-1. Agent 模板编辑页提供“挂载知识库”开关。
-2. 开启后显示“可访问知识库”多选框。
-3. 保存时若未选择知识库，前端会阻止提交。
-4. 内部检索工具不会出现在工具管理页或模板 MCP 工具列表中。
+1. Agent 模板编辑页只展示“挂载知识库”能力开关。
+2. Agent 调用页和 Playground 在模板开启能力时展示知识库多选框。
+3. 前端把选择结果放入 `knowledge.knowledge_base_ids`，不写入 `optional_features`。
+4. 内部检索工具不出现在工具管理页或模板 MCP 工具列表中。

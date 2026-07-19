@@ -41,11 +41,18 @@ class AgentTemplateService:
         return self.to_view(template)
 
     def _clean_template_config(self, config: dict) -> dict:
-        """Remove deprecated runtime-only fields before template config is stored or returned."""
+        """清理模板中已经废弃或只属于单次运行的字段。"""
         cleaned_config = dict(config or {})
-        # Remove the deprecated structured-output schema key from older template records.
+        # 清理旧版结构化输出字段，避免历史 JSONB 配置继续向外返回。
         deprecated_schema_key = "response_" + "format"
         cleaned_config.pop(deprecated_schema_key, None)
+
+        # 知识库访问范围属于单次运行授权，模板只保存 knowledge_enabled 能力开关。
+        optional_features = cleaned_config.get("optional_features")
+        if isinstance(optional_features, dict):
+            cleaned_features = dict(optional_features)
+            cleaned_features.pop("knowledge_base_ids", None)
+            cleaned_config["optional_features"] = cleaned_features
         return cleaned_config
 
     def get_template(self, db: Session, agent_id: str) -> AgentTemplateView | None:

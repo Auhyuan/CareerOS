@@ -66,12 +66,13 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
     from app.common.db.postgres_db import get_db_session
     from app.server.agent.src.agent.service import AgentService
     from app.server.agent.src.runs import AgentRunService
-    from app.server.agent.src.schemas.request import AgentOptionalFeatures, AgentRunRequest
+    from app.server.agent.src.schemas.request import AgentKnowledgeConfig, AgentRunRequest
     from app.server.agent.src.templates.service import AgentTemplateService
 
     parent_conversation_id = None
     parent_run_id = None
     parent_inputs: dict = {}
+    parent_knowledge_base_ids: list[str] = []
     parent_tool_call_id = getattr(runtime, "tool_call_id", None) if runtime is not None else None
     if runtime is not None:
         ctx = getattr(runtime, "context", None) or {}
@@ -79,11 +80,13 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
             parent_conversation_id = str(ctx.get("thread_id") or "") or None
             parent_run_id = str(ctx.get("run_id") or "") or None
             parent_inputs = dict(ctx.get("inputs") or {})
+            parent_knowledge_base_ids = list(ctx.get("knowledge_base_ids") or [])
         elif hasattr(ctx, "model_dump"):
             context_data = ctx.model_dump()
             parent_conversation_id = str(context_data.get("thread_id") or "") or None
             parent_run_id = str(context_data.get("run_id") or "") or None
             parent_inputs = dict(context_data.get("inputs") or {})
+            parent_knowledge_base_ids = list(context_data.get("knowledge_base_ids") or [])
 
     sub_run_id = uuid4().hex
     sub_started_at = time.perf_counter()
@@ -127,7 +130,17 @@ async def a2a_call(agent_id: str, query: str, runtime: ToolRuntime) -> str:
             "_parent_conversation_id": parent_conversation_id,
         },
         tools=list(config.tools or []),
-        optional_features=AgentOptionalFeatures(long_term_memory_enabled=False),
+        # 子 Agent 继承模板能力，但强制关闭长期记忆，保持本次 A2A 调用无状态。
+        optional_features=config.optional_features.model_copy(
+            update={"long_term_memory_enabled": False},
+            deep=True,
+        ),
+        # 子 Agent 只能继承父运行已经授权的知识库范围，不能自行扩大访问边界。
+        knowledge=(
+            AgentKnowledgeConfig(knowledge_base_ids=parent_knowledge_base_ids)
+            if parent_knowledge_base_ids
+            else None
+        ),
         runtime_options=config.runtime_options,
         a2a=None,
     )

@@ -52,7 +52,7 @@ class AgentRuntimeContextService:
             memory_enabled=request.optional_features.long_term_memory_enabled,
             planning_enabled=request.optional_features.planning_enabled,
             knowledge_enabled=request.optional_features.knowledge_enabled,
-            knowledge_base_ids=request.optional_features.knowledge_base_ids,
+            knowledge_base_ids=(request.knowledge.knowledge_base_ids if request.knowledge else []),
             a2a_sub_agent_list=a2a_sub_agent_list,
         )
 
