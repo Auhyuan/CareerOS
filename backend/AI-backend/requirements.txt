@@ -33,3 +33,8 @@ typing_extensions==4.15.0
 
 python-multipart==0.0.20
 pymupdf4llm==1.28.0
+
+# Knowledge base
+langchain-text-splitters==1.0.0
+# Milvus 3.0 服务端对应的官方 Python SDK。
+pymilvus==3.0.0

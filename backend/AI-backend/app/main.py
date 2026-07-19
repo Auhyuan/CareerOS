@@ -16,6 +16,7 @@ from app.common.core.lifespan import app_lifespan
 from app.common.schemas.result import Result
 from app.server.agent.api import router as agent_router
 from app.server.file.api import router as file_router
+from app.server.knowledge.api import router as knowledge_router
 
 
 def create_app() -> FastAPI:
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(agent_router, prefix="/agent", tags=["agent service"])
     app.include_router(file_router, tags=["file service"])
+    app.include_router(knowledge_router, tags=["knowledge service"])
 
     @app.get("/")
     def root_endpoint():
@@ -46,7 +48,7 @@ def print_startup_banner() -> None:
     host = os.getenv("FASTAPI_HOST", "127.0.0.1")
     port = os.getenv("FASTAPI_PORT", "8090")
     print(f"AI-backend starting: http://{host}:{port}")
-    print("Public modules: /agent, /file")
+    print("Public modules: /agent, /file, /knowledge")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.common.db.postgres_db import check_postgres_health
+from app.server.knowledge.src.services import knowledge_service
 
 
 @asynccontextmanager
@@ -14,4 +15,9 @@ async def app_lifespan(app: FastAPI):
     """
     check_postgres_health()
     print("PostgreSQL 健康检查通过")
-    yield
+    await knowledge_service.startup()
+    try:
+        yield
+    finally:
+        # 统一关闭知识库模块持有的 HTTP 连接池与 Milvus 连接。
+        await knowledge_service.close()
