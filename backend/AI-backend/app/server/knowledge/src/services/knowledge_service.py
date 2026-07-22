@@ -37,7 +37,7 @@ class KnowledgeService:
             },
             "ingestion": {
                 "enabled": True,
-                "worker_enabled": knowledge_config.ingestion_worker_enabled,
+                "worker_enabled": True,
                 "queue": "postgresql_skip_locked",
             },
         }
@@ -116,29 +116,41 @@ class KnowledgeService:
         ready = all(component["status"] == "ok" for component in components.values())
         return {
             "status": "ready" if ready else "not_ready",
-            "worker": "enabled" if knowledge_config.ingestion_worker_enabled else "disabled",
+            "worker": "enabled",
             "components": components,
         }
 
     async def startup(self) -> None:
-        """执行本地能力检查，并按配置选择是否检查外部依赖。"""
+        """检查知识库全部基础依赖，并在检查通过后启动入库 Worker。"""
         split_service.health_check()
         logger.info("知识库本地切片能力检查通过")
-        if not knowledge_config.knowledge_startup_dependency_check:
-            logger.info("知识库外部依赖检查已跳过，可通过 KNOWLEDGE_STARTUP_DEPENDENCY_CHECK 开启")
-        else:
-            checks: list[tuple[str, Any]] = [
-                ("milvus", milvus_store.health_check()),
+
+        # 启动检查与 readiness 接口复用同一套逻辑，防止两处检查范围逐渐不一致。
+        readiness = await self.readiness()
+        for component_name, component in readiness["components"].items():
+            if component["status"] == "ok":
+                logger.info(
+                    "知识库依赖检查通过: component=%s detail=%s",
+                    component_name,
+                    component["detail"],
+                )
+            else:
+                logger.error(
+                    "知识库依赖检查失败: component=%s reason=%s",
+                    component_name,
+                    component["detail"],
+                )
+
+        if readiness["status"] != "ready":
+            failed_components = [
+                name
+                for name, component in readiness["components"].items()
+                if component["status"] != "ok"
             ]
-            results = await asyncio.gather(
-                *(asyncio.wait_for(check, timeout=knowledge_config.startup_health_check_timeout) for _, check in checks),
-                return_exceptions=True,
+            raise RuntimeError(
+                "知识库基础依赖健康检查失败: " + ", ".join(failed_components)
             )
-            for (name, _), result in zip(checks, results, strict=True):
-                if isinstance(result, Exception):
-                    logger.warning("知识库外部依赖检查失败: component=%s reason=%s", name, result)
-                else:
-                    logger.info("知识库外部依赖检查通过: component=%s result=%s", name, result)
+
         await ingestion_worker_manager.start()
 
     async def close(self) -> None:

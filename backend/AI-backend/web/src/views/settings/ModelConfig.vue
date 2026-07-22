@@ -86,12 +86,12 @@
           </a-col>
         </a-row>
         <a-row :gutter="16">
-          <a-col :span="12">
+          <a-col :span="form.model_type === 'embedding' ? 8 : 12">
             <a-form-item label="model_name" required>
               <a-input v-model:value="form.model_name" placeholder="deepseek-chat" />
             </a-form-item>
           </a-col>
-          <a-col v-if="form.model_type === 'embedding'" :span="12">
+          <a-col v-if="form.model_type === 'embedding'" :span="8">
             <a-form-item label="向量维度" required>
               <a-input-number
                 v-model:value="embeddingDimension"
@@ -99,6 +99,17 @@
                 :precision="0"
                 style="width: 100%"
                 placeholder="例如 1024"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col v-if="form.model_type === 'embedding'" :span="8">
+            <a-form-item label="批大小">
+              <a-input-number
+                v-model:value="embeddingBatchSize"
+                :min="1"
+                :max="256"
+                :precision="0"
+                style="width: 100%"
               />
             </a-form-item>
           </a-col>
@@ -176,6 +187,21 @@ const embeddingDimension = computed<number | undefined>({
     form.extra_config = {
       ...(form.extra_config || {}),
       dimension: value,
+    }
+  },
+})
+
+const embeddingBatchSize = computed<number>({
+  /** 读取 Embedding 单次请求的文本数量，旧配置默认显示 32。 */
+  get() {
+    const value = form.extra_config?.batch_size
+    return typeof value === 'number' ? value : 32
+  },
+  /** 把批大小写回模型扩展配置。 */
+  set(value) {
+    form.extra_config = {
+      ...(form.extra_config || {}),
+      batch_size: value,
     }
   },
 })

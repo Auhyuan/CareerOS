@@ -44,6 +44,8 @@ import {
   ApartmentOutlined,
   BookOutlined,
   PlayCircleOutlined,
+  // @ts-ignore - DatabaseOutlined 在 es/icons/index.d.ts 缺失类型
+  DatabaseOutlined,
 } from '@ant-design/icons-vue'
 
 defineOptions({ name: 'DefaultLayout' })
@@ -68,6 +70,7 @@ const menuItems = ref<MenuItem[]>([
   { path: '/agent-invoke', title: 'Agent 调用', icon: PlayCircleOutlined, group: 'Agent 管理' },
   { path: '/conversations', title: '会话历史', icon: MessageOutlined, group: '会话' },
   { path: '/runs', title: '运行监控', icon: LineChartOutlined, group: '监控' },
+  { path: '/knowledge', title: '知识库', icon: DatabaseOutlined, group: '运维' },
   { path: '/tools', title: '工具管理', icon: ToolOutlined, group: '运维' },
   { path: '/settings/model', title: '模型配置', icon: SettingOutlined, group: '运维' },
   { path: '/a2a', title: 'A2A 拓扑', icon: ApartmentOutlined, group: '运维' },

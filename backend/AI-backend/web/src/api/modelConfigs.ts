@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 模型配置接口
  * 对齐后端 /agent/models/*，用于管理平台模型资源池。
  */
@@ -69,4 +69,28 @@ export function upsertModelConfig(payload: ModelConfigUpsertPayload) {
 /** 批量删除模型配置。 */
 export function deleteModelConfigs(model_codes: string[]) {
   return httpPost<number>('/agent/models/delete', { model_codes })
+}
+
+/**
+ * 拉取所有已启用的 Embedding 模型，供知识库创建表单使用。
+ * - 复用 search 接口，便于复用分页/过滤
+ * - 翻页拉完所有数据，返回扁平数组
+ */
+export async function listEnabledEmbeddingModels(): Promise<ModelConfigItem[]> {
+  const PAGE_SIZE = 100
+  const all: ModelConfigItem[] = []
+  let page = 1
+  // 最多翻 10 页（= 1000 条），超过则截断；embedding 模型一般 < 20 条
+  while (page <= 10) {
+    const resp = await searchModelConfigs({
+      model_type: 'embedding',
+      enabled: true,
+      page,
+      page_size: PAGE_SIZE,
+    })
+    all.push(...resp.items)
+    if (all.length >= resp.total || resp.items.length < PAGE_SIZE) break
+    page += 1
+  }
+  return all
 }

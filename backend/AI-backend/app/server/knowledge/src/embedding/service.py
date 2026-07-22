@@ -57,13 +57,41 @@ class EmbeddingService:
         max_retries: int = DEFAULT_MODEL_MAX_RETRIES,
     ) -> list[float]:
         """使用知识库绑定的 Embedding model_code 生成单条文本向量。"""
-        clean_text = self._normalize_text(text)
+        vectors = await self.embed_texts(
+            texts=[text],
+            model_code=model_code,
+            extra_params=extra_params,
+            resource=resource,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+        )
+        return vectors[0]
+
+    async def embed_texts(
+        self,
+        texts: list[str],
+        model_code: str,
+        extra_params: dict[str, Any] | None = None,
+        resource: ModelRuntimeResource | None = None,
+        timeout_seconds: int = DEFAULT_MODEL_TIMEOUT_SECONDS,
+        max_retries: int = DEFAULT_MODEL_MAX_RETRIES,
+    ) -> list[list[float]]:
+        """批量生成文本向量；调用方负责按模型批大小拆分超长输入列表。"""
+        if not texts:
+            return []
+        clean_texts = [self._normalize_text(text) for text in texts]
         resolved_resource = resource or resolve_model_resource(model_code, "embedding")
         if resolved_resource.model_code != model_code:
             raise ValueError("Embedding model_code 与预解析模型资源不一致")
+        if len(clean_texts) > resolved_resource.embedding_batch_size:
+            raise ValueError(
+                "单次 Embedding 文本数量超过模型批大小: "
+                f"count={len(clean_texts)}, batch_size={resolved_resource.embedding_batch_size}"
+            )
+
         payload: dict[str, Any] = {
             "model": resolved_resource.model_name,
-            "input": [clean_text],
+            "input": clean_texts,
         }
         if extra_params:
             payload.update(extra_params)
@@ -74,7 +102,11 @@ class EmbeddingService:
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
         )
-        return self._parse_embedding_response(response.json())
+        return self._parse_embedding_response(
+            response.json(),
+            expected_count=len(clean_texts),
+            expected_dimension=resolved_resource.dimension,
+        )
 
     async def _post_embedding_with_retry(
         self,
@@ -153,16 +185,46 @@ class EmbeddingService:
         return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     @staticmethod
-    def _parse_embedding_response(data: dict[str, Any]) -> list[float]:
-        """解析 OpenAI-compatible 单条 Embedding 响应。"""
-        items = data.get("data") or []
-        if len(items) != 1:
-            raise ValueError("embedding response size mismatch")
-        item = items[0]
-        embedding = item.get("embedding") if isinstance(item, dict) else None
-        if not isinstance(embedding, list):
-            raise ValueError("invalid embedding format in response")
-        return [float(value) for value in embedding]
+    def _parse_embedding_response(
+        data: dict[str, Any],
+        *,
+        expected_count: int,
+        expected_dimension: int | None,
+    ) -> list[list[float]]:
+        """解析批量响应，并根据 index 恢复为与输入文本一致的向量顺序。"""
+        items = data.get("data")
+        if not isinstance(items, list) or len(items) != expected_count:
+            raise ValueError(
+                "Embedding 响应数量不匹配: "
+                f"expected={expected_count}, actual={len(items) if isinstance(items, list) else 0}"
+            )
+
+        ordered_vectors: list[list[float] | None] = [None] * expected_count
+        for fallback_index, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError("Embedding 响应 data 的元素必须是对象")
+            raw_index = item.get("index", fallback_index)
+            if not isinstance(raw_index, int) or isinstance(raw_index, bool):
+                raise ValueError("Embedding 响应 index 必须是整数")
+            if raw_index < 0 or raw_index >= expected_count:
+                raise ValueError(f"Embedding 响应 index 越界: {raw_index}")
+            if ordered_vectors[raw_index] is not None:
+                raise ValueError(f"Embedding 响应 index 重复: {raw_index}")
+
+            embedding = item.get("embedding")
+            if not isinstance(embedding, list):
+                raise ValueError("Embedding 响应 embedding 必须是数组")
+            vector = [float(value) for value in embedding]
+            if expected_dimension is not None and len(vector) != expected_dimension:
+                raise ValueError(
+                    "Embedding 向量维度不匹配: "
+                    f"expected={expected_dimension}, actual={len(vector)}, index={raw_index}"
+                )
+            ordered_vectors[raw_index] = vector
+
+        if any(vector is None for vector in ordered_vectors):
+            raise ValueError("Embedding 响应缺少部分输入对应的向量")
+        return [vector for vector in ordered_vectors if vector is not None]
 
 
 embedding_service = EmbeddingService()

@@ -27,13 +27,8 @@ class KnowledgeConfig(BaseSettings):
     metadata_headers_weight: float = Field(default=0.6, ge=0, le=10, alias="RETRIEVAL_METADATA_HEADERS_WEIGHT")
     document_max_chunks: int = Field(default=5000, ge=1, alias="RETRIEVAL_DOCUMENT_MAX_CHUNKS")
 
-    knowledge_startup_dependency_check: bool = Field(
-        default=False,
-        description="启动时是否真实检查 Embedding、Milvus 和 Rerank 依赖",
-    )
     startup_health_check_timeout: float = Field(default=15, ge=1, alias="KNOWLEDGE_STARTUP_HEALTH_CHECK_TIMEOUT")
 
-    ingestion_worker_enabled: bool = Field(default=False, alias="KNOWLEDGE_INGESTION_WORKER_ENABLED")
     ingestion_worker_count: int = Field(default=1, ge=1, le=16, alias="KNOWLEDGE_INGESTION_WORKER_COUNT")
     ingestion_poll_interval_seconds: float = Field(
         default=1,

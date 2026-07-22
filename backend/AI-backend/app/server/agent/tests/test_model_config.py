@@ -32,6 +32,17 @@ class ModelConfigSchemaTestCase(unittest.TestCase):
         )
         self.assertEqual(request.extra_config["dimension"], 1024)
 
+    def test_embedding_model_rejects_invalid_batch_size(self) -> None:
+        """Embedding 批大小必须限制在服务允许的安全范围内。"""
+        with self.assertRaises(ValidationError):
+            ModelConfigUpsertRequest(
+                model_code="embedding-test",
+                model_name="provider-embedding",
+                model_type="embedding",
+                base_url="http://127.0.0.1:8000/v1",
+                extra_config={"dimension": 1024, "batch_size": 0},
+            )
+
     def test_model_runtime_defaults_are_shared(self) -> None:
         """模型调用默认超时和重试次数应由公共常量统一提供。"""
         options = ModelRuntimeOptions()

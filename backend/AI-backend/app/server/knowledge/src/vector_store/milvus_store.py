@@ -8,7 +8,7 @@ from typing import Any
 from pymilvus import DataType, MilvusClient
 
 from app.server.knowledge.src.config import knowledge_config as settings
-from app.server.knowledge.src.embedding.schemas import PersistentOptions
+from app.server.knowledge.src.embedding.schemas import PersistentOptions, PersistentVectorWrite
 from app.server.knowledge.src.logging_config import logger
 from app.server.knowledge.src.milvus_client import milvus_client_manager
 
@@ -91,25 +91,51 @@ class MilvusVectorStoreService:
         model_name: str,
         expected_dimension: int,
     ) -> str:
-        """校验并写入单条知识切片，返回切片主键。"""
-        self._validate_record(
-            text=text,
-            embedding=embedding,
-            options=options,
+        """校验并写入单条知识切片，保留对单条调用场景的兼容。"""
+        del model_name  # Collection 已在创建时记录模型，写入阶段无需重复使用。
+        await self.insert_many(
+            writes=[PersistentVectorWrite(text=text, embedding=embedding, record=options)],
             expected_dimension=expected_dimension,
         )
+        return options.chunk_id
+
+    async def insert_many(
+        self,
+        writes: list[PersistentVectorWrite],
+        expected_dimension: int,
+    ) -> list[str]:
+        """一次校验并写入同一 Collection 的多条知识切片。"""
+        if not writes:
+            return []
+        collection_names = {write.record.collection_name for write in writes}
+        if len(collection_names) != 1:
+            raise ValueError("Milvus 批量写入只能包含同一个 Collection 的记录")
+        for write in writes:
+            self._validate_record(
+                text=write.text,
+                embedding=write.embedding,
+                options=write.record,
+                expected_dimension=expected_dimension,
+            )
+
+        collection_name = writes[0].record.collection_name
         await self._ensure_connection()
-        await self.ensure_collection_exists(options.collection_name)
+        await self.ensure_collection_exists(collection_name)
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(self._insert_sync, text, embedding, options),
+                asyncio.to_thread(
+                    self._insert_many_sync,
+                    collection_name,
+                    writes,
+                    expected_dimension,
+                ),
                 timeout=settings.milvus_write_timeout,
             )
         except TimeoutError as exc:
             raise TimeoutError(
-                f"Milvus insert timeout after {settings.milvus_write_timeout}s"
+                f"Milvus batch insert timeout after {settings.milvus_write_timeout}s"
             ) from exc
-        return options.chunk_id
+        return [write.record.chunk_id for write in writes]
 
     async def _ensure_connection(self) -> None:
         """在线程池中按需初始化共享 MilvusClient。"""
@@ -140,31 +166,41 @@ class MilvusVectorStoreService:
         logger.info("Milvus collection 已删除：collection=%s", collection_name)
         return True
 
-    def _insert_sync(self, text: str, embedding: list[float], options: PersistentOptions) -> None:
-        """按照固定知识库 Schema 写入一条行式数据。"""
+    def _insert_many_sync(
+        self,
+        collection_name: str,
+        writes: list[PersistentVectorWrite],
+        expected_dimension: int,
+    ) -> None:
+        """校验一次 Collection Schema，并批量写入多条行式数据。"""
         client = self._client()
         description = client.describe_collection(
-            collection_name=options.collection_name,
+            collection_name=collection_name,
             timeout=settings.milvus_query_timeout,
         )
-        self._validate_collection_schema(description, len(embedding))
+        self._validate_collection_schema(description, expected_dimension)
 
-        # 文件名进入 metadata，便于标题检索区分同标题的不同文档。
-        metadata = dict(options.metadata or {})
-        if options.source and "file_name" not in metadata:
-            metadata["file_name"] = os.path.splitext(options.source)[0]
-        client.insert(
-            collection_name=options.collection_name,
-            data=[{
+        rows: list[dict[str, Any]] = []
+        for write in writes:
+            options = write.record
+            # 文件名进入 metadata，便于标题检索区分同标题的不同文档。
+            metadata = dict(options.metadata or {})
+            if options.source and "file_name" not in metadata:
+                metadata["file_name"] = os.path.splitext(options.source)[0]
+            rows.append({
                 "id": options.chunk_id,
-                "content": text,
+                "content": write.text,
                 "source": options.source,
                 "chunk_id": options.chunk_id,
                 "file_id": options.file_id,
                 "chunk_index": options.chunk_index,
                 "metadata": metadata,
-                "embedding": embedding,
-            }],
+                "embedding": write.embedding,
+            })
+
+        client.insert(
+            collection_name=collection_name,
+            data=rows,
             timeout=settings.milvus_write_timeout,
         )
 

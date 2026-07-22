@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.server.knowledge.src.split.schemas import SplitMethodConfig, SplitStrategyConfig
 
 
 class KnowledgeBaseCreateRequest(BaseModel):
@@ -46,6 +48,21 @@ class KnowledgeDocumentSubmitRequest(BaseModel):
     file_id: str = Field(min_length=1, max_length=100)
     force_reindex: bool = False
     priority: int = Field(default=0, ge=-100, le=100)
+    split_method: SplitMethodConfig | None = Field(
+        default=None,
+        description="本次文档使用的单一切片方式；为空时继承知识库默认配置",
+    )
+    split_strategy: SplitStrategyConfig | None = Field(
+        default=None,
+        description="本次文档使用的组合切片策略；为空时继承知识库默认配置",
+    )
+
+    @model_validator(mode="after")
+    def validate_split_selection(self) -> "KnowledgeDocumentSubmitRequest":
+        """限制单一切片方式和组合切片策略只能选择其中一种。"""
+        if self.split_method is not None and self.split_strategy is not None:
+            raise ValueError("split_method 和 split_strategy 只能选择一个")
+        return self
 
 
 class IngestionRunQueryRequest(BaseModel):

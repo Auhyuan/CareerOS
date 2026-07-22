@@ -34,9 +34,17 @@ class ModelConfigUpsertRequest(BaseModel):
         """Embedding 模型必须配置正整数向量维度。"""
         if self.model_type != "embedding":
             return self
-        dimension = (self.extra_config or {}).get("dimension")
-        if not isinstance(dimension, int) or dimension <= 0:
+        extra_config = self.extra_config or {}
+        dimension = extra_config.get("dimension")
+        if not isinstance(dimension, int) or isinstance(dimension, bool) or dimension <= 0:
             raise ValueError("Embedding 模型必须在 extra_config.dimension 配置正整数向量维度")
+        batch_size = extra_config.get("batch_size", 32)
+        if (
+            not isinstance(batch_size, int)
+            or isinstance(batch_size, bool)
+            or not 1 <= batch_size <= 256
+        ):
+            raise ValueError("Embedding 模型 extra_config.batch_size 必须是 1 到 256 的整数")
         return self
 
     @field_validator("model_code", "model_name", "model_type", "base_url", "api_type")

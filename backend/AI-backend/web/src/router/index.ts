@@ -79,7 +79,21 @@ const routes = [
     component: () => import('@/views/runs/RunMonitor.vue'),
     meta: { layout: 'default', title: '运行监控' },
   },
-  // 8. 工具管理
+  // 8. 知识库管理（列表）
+  {
+    path: '/knowledge',
+    name: 'KnowledgeList',
+    component: () => import('@/views/knowledge/KnowledgeList.vue'),
+    meta: { layout: 'default', title: '知识库' },
+  },
+  // 8.1 知识库新建
+  {
+    path: '/knowledge/create',
+    name: 'KnowledgeCreate',
+    component: () => import('@/views/knowledge/KnowledgeForm.vue'),
+    meta: { layout: 'default', title: '新建知识库' },
+  },
+  // 9. 工具管理
   {
     path: '/tools',
     name: 'ToolManager',

@@ -22,10 +22,7 @@ class IngestionWorkerManager:
         self._worker_prefix = f"{socket.gethostname()}-{uuid4().hex[:8]}"
 
     async def start(self) -> None:
-        """按环境配置启动 Worker；关闭配置时保持静默。"""
-        if not knowledge_config.ingestion_worker_enabled:
-            logger.info("知识入库 Worker 未启用")
-            return
+        """启动知识入库 Worker；重复调用时保持幂等。"""
         if self._tasks:
             return
 

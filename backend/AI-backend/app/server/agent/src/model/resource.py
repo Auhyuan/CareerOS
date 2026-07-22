@@ -22,7 +22,17 @@ class ModelRuntimeResource:
     def dimension(self) -> int | None:
         """读取 Embedding 模型配置中的向量维度。"""
         value = self.extra_config.get("dimension")
-        return value if isinstance(value, int) and value > 0 else None
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+    @property
+    def embedding_batch_size(self) -> int:
+        """读取 Embedding 批大小，未配置时使用兼容性较好的默认值 32。"""
+        value = self.extra_config.get("batch_size", 32)
+        if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 256:
+            return value
+        raise ValueError(
+            f"Embedding 模型 {self.model_code} 的 extra_config.batch_size 必须是 1 到 256 的整数"
+        )
 
 
 def resolve_model_resource(model_code: str, model_type: str) -> ModelRuntimeResource:

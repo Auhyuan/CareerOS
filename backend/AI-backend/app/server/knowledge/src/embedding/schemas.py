@@ -84,5 +84,13 @@ class PersistentVectorRecord(BaseModel):
         return normalized
 
 
+class PersistentVectorWrite(BaseModel):
+    """单条待写入 Milvus 的文本、向量和索引元数据。"""
+
+    text: str = Field(..., min_length=1)
+    embedding: list[float] = Field(..., min_length=1)
+    record: PersistentVectorRecord
+
+
 # 保留旧内部名称，避免 Milvus 适配器在本次目录整理中承担无关改动。
 PersistentOptions = PersistentVectorRecord

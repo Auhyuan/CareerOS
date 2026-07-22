@@ -126,20 +126,39 @@ class KnowledgeManagementService:
             )
 
         operation = "reindex" if request.force_reindex and document.status == "indexed" else "ingest"
+
+        # 每个入库任务保存切片配置快照，保证排队、自动重试和人工重试使用同一套规则。
+        split_config = self._resolve_document_split_config(request, knowledge.split_config)
         run, reused = ingestion_queue_service.submit(
             db,
             document=document,
             operation=operation,
             priority=request.priority,
             max_retries=knowledge_config.ingestion_max_retries,
-            payload={},
+            payload={"split_config": split_config},
         )
+        if reused:
+            active_split_config = (run.payload or {}).get("split_config") or knowledge.split_config
+            if active_split_config != split_config:
+                raise ValueError("该文档已有使用不同切片配置的入库任务正在执行，请等待任务结束后重试")
         db.refresh(document)
         return KnowledgeDocumentSubmitResponse(
             document=self.to_document_response(document),
             run=IngestionRunResponse.model_validate(run, from_attributes=True),
             reused_active_run=reused,
         )
+
+    @staticmethod
+    def _resolve_document_split_config(
+        request: KnowledgeDocumentSubmitRequest,
+        knowledge_default: dict,
+    ) -> dict:
+        """解析文档级切片配置；未覆盖时返回知识库默认配置快照。"""
+        if request.split_strategy is not None:
+            return request.split_strategy.model_dump()
+        if request.split_method is not None:
+            return request.split_method.model_dump()
+        return dict(knowledge_default)
 
     @staticmethod
     def _normalize_split_config(raw_config: dict) -> dict:

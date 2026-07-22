@@ -96,6 +96,52 @@ class KnowledgeServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["components"]["milvus_vector_store"]["detail"], "TimeoutError")
 
 
+    async def test_startup_starts_worker_after_dependencies_are_ready(self) -> None:
+        """全部基础依赖健康时应启动知识入库 Worker。"""
+        readiness = {
+            "status": "ready",
+            "worker": "enabled",
+            "components": {
+                "postgresql": {"status": "ok", "detail": "ok"},
+                "milvus_retrieval": {"status": "ok", "detail": "career_ai"},
+                "milvus_vector_store": {"status": "ok", "detail": "career_ai"},
+            },
+        }
+        with (
+            patch.object(knowledge_service, "readiness", new=AsyncMock(return_value=readiness)),
+            patch(
+                "app.server.knowledge.src.services.knowledge_service.ingestion_worker_manager.start",
+                new=AsyncMock(),
+            ) as start_worker,
+        ):
+            await knowledge_service.startup()
+
+        start_worker.assert_awaited_once()
+
+    async def test_startup_rejects_unhealthy_dependency(self) -> None:
+        """任一基础依赖失败时应终止启动且不能启动入库 Worker。"""
+        readiness = {
+            "status": "not_ready",
+            "worker": "enabled",
+            "components": {
+                "postgresql": {"status": "ok", "detail": "ok"},
+                "milvus_retrieval": {"status": "failed", "detail": "connection refused"},
+                "milvus_vector_store": {"status": "ok", "detail": "career_ai"},
+            },
+        }
+        with (
+            patch.object(knowledge_service, "readiness", new=AsyncMock(return_value=readiness)),
+            patch(
+                "app.server.knowledge.src.services.knowledge_service.ingestion_worker_manager.start",
+                new=AsyncMock(),
+            ) as start_worker,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "milvus_retrieval"):
+                await knowledge_service.startup()
+
+        start_worker.assert_not_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()
 
