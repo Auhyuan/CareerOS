@@ -8,8 +8,12 @@ from pydantic import ValidationError
 from app.server.agent.src.model.resource import ModelRuntimeResource
 from app.server.knowledge.src.embedding.service import EmbeddingService
 from app.server.knowledge.src.ingestion.executor import ingestion_executor
+from app.server.knowledge.src.models import IngestionRun
 from app.server.knowledge.src.repositories import KnowledgeChunkRepository
-from app.server.knowledge.src.schemas.knowledge_schemas import KnowledgeDocumentSubmitRequest
+from app.server.knowledge.src.schemas.knowledge_schemas import (
+    KnowledgeBaseUpdateRequest,
+    KnowledgeDocumentSubmitRequest,
+)
 from app.server.knowledge.src.services.knowledge_management_service import knowledge_management_service
 from app.server.knowledge.src.split.schemas import (
     MarkdownDocumentHeaderThenRecursiveStrategyConfig,
@@ -133,6 +137,20 @@ class IngestionComponentTestCase(unittest.TestCase):
                 expected_dimension=2,
             )
 
+    def test_knowledge_update_accepts_explicit_null_description(self) -> None:
+        """知识库更新应允许显式传 null 清空描述。"""
+        request = KnowledgeBaseUpdateRequest(
+            knowledge_id="kb_test",
+            description=None,
+        )
+
+        self.assertIn("description", request.model_fields_set)
+
+    def test_knowledge_update_rejects_empty_changes(self) -> None:
+        """只传 knowledge_id 时应拒绝无意义更新。"""
+        with self.assertRaises(ValidationError):
+            KnowledgeBaseUpdateRequest(knowledge_id="kb_test")
+
     def test_replace_chunks_does_not_commit_business_transaction(self) -> None:
         """替换分块只能刷新 SQL，最终事务必须由入库执行器统一提交。"""
         db = MagicMock()
@@ -144,6 +162,28 @@ class IngestionComponentTestCase(unittest.TestCase):
         db.add_all.assert_called_once_with([])
         db.flush.assert_called_once_with()
         db.commit.assert_not_called()
+
+
+class IngestionExecutorLifecycleTestCase(unittest.IsolatedAsyncioTestCase):
+    """验证入库执行器对不同生命周期任务的分发。"""
+
+    async def test_delete_operation_only_runs_delete_pipeline(self) -> None:
+        """delete 任务应等待专用删除流程完成，不得进入普通入库流程。"""
+        run = IngestionRun(
+            run_id="run_delete",
+            document_id=1,
+            knowledge_id="kb_test",
+            file_id="file_test",
+            operation="delete",
+        )
+        with patch.object(
+            ingestion_executor,
+            "_execute_delete",
+            new=AsyncMock(),
+        ) as execute_delete:
+            await ingestion_executor.execute(run)
+
+        execute_delete.assert_awaited_once_with(run)
 
 
 class EmbeddingBatchServiceTestCase(unittest.IsolatedAsyncioTestCase):

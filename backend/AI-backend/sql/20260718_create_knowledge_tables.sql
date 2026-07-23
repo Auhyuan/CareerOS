@@ -27,7 +27,7 @@ CREATE TABLE knowledge.knowledge_documents (
     file_id VARCHAR(100) NOT NULL
         REFERENCES agent.uploaded_files(file_id) ON DELETE RESTRICT,
     status VARCHAR(30) NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'indexing', 'indexed', 'failed', 'deleted')),
+        CHECK (status IN ('pending', 'indexing', 'indexed', 'deleting', 'failed', 'deleted')),
     index_version INTEGER NOT NULL DEFAULT 1 CHECK (index_version > 0),
     chunk_count INTEGER NOT NULL DEFAULT 0 CHECK (chunk_count >= 0),
     index_config JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -148,7 +148,7 @@ COMMENT ON COLUMN knowledge.knowledge_bases.updated_at IS '更新时间';
 
 COMMENT ON COLUMN knowledge.knowledge_documents.id IS '知识库文件关系内部主键';
 COMMENT ON COLUMN knowledge.knowledge_documents.knowledge_id IS '所属知识库ID';
-COMMENT ON COLUMN knowledge.knowledge_documents.status IS '索引状态：pending、indexing、indexed、failed、deleted';
+COMMENT ON COLUMN knowledge.knowledge_documents.status IS '索引状态：pending、indexing、indexed、deleting、failed、deleted';
 COMMENT ON COLUMN knowledge.knowledge_documents.chunk_count IS '当前有效分块数量';
 COMMENT ON COLUMN knowledge.knowledge_documents.error_message IS '最近一次索引失败原因';
 COMMENT ON COLUMN knowledge.knowledge_documents.indexed_at IS '最近一次成功索引时间';

@@ -81,6 +81,7 @@ const menuItems = ref<MenuItem[]>([
 const activeMenuKey = computed(() => {
   // /agents/:id/edit 应当高亮 /agents
   if (route.path.startsWith('/agents')) return '/agents'
+  if (route.path.startsWith('/knowledge')) return '/knowledge'
   const matched = menuItems.value.find((m) => m.path === route.path)
   return matched?.path || route.path
 })

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, func, select
 
 from app.common.db.postgres_db import get_db_session
 from app.server.knowledge.src.logging_config import logger
@@ -70,7 +70,8 @@ class IngestionQueueService:
             max_retries=max_retries,
             payload=payload or {},
         )
-        document.status = "pending"
+        # 删除任务进入独立的 deleting 状态，避免前端把它误认为待入库任务。
+        document.status = "deleting" if operation == "delete" else "pending"
         document.error_message = None
         document.updated_at = utc_now()
         db.add(document)
@@ -90,6 +91,76 @@ class IngestionQueueService:
     def get(self, db: Session, run_id: str) -> IngestionRun | None:
         """根据任务 ID 查询任务运行记录。"""
         return db.get(IngestionRun, run_id)
+
+    def search(
+        self,
+        db: Session,
+        *,
+        knowledge_id: str | None,
+        file_id: str | None,
+        operation: str | None,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[IngestionRun], int]:
+        """按筛选条件分页查询任务运行记录。"""
+        filters = []
+        if knowledge_id:
+            filters.append(IngestionRun.knowledge_id == knowledge_id)
+        if file_id:
+            filters.append(IngestionRun.file_id == file_id)
+        if operation:
+            filters.append(IngestionRun.operation == operation)
+        if status:
+            filters.append(IngestionRun.status == status)
+
+        count_statement = select(func.count()).select_from(IngestionRun)
+        statement = select(IngestionRun)
+        for condition in filters:
+            count_statement = count_statement.where(condition)
+            statement = statement.where(condition)
+
+        total = int(db.exec(count_statement).one())
+        statement = (
+            statement
+            .order_by(col(IngestionRun.created_at).desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(db.exec(statement).all()), total
+
+    def has_active_for_knowledge(self, db: Session, knowledge_id: str) -> bool:
+        """判断知识库是否仍有待执行或运行中的任务。"""
+        statement = select(IngestionRun.run_id).where(
+            IngestionRun.knowledge_id == knowledge_id,
+            col(IngestionRun.status).in_(self.ACTIVE_STATUSES),
+        )
+        return db.exec(statement).first() is not None
+
+    def cancel_pending(self, db: Session, run_id: str) -> IngestionRun:
+        """取消尚未被 Worker 抢占的任务，并恢复关联文档的可用状态。"""
+        run = self.get(db, run_id)
+        if run is None:
+            raise ValueError(f"入库任务不存在: {run_id}")
+        if run.status != "pending":
+            raise ValueError("只有 pending 状态的任务可以取消")
+
+        document = db.get(KnowledgeDocument, run.document_id)
+        run.status = "cancelled"
+        run.completed_at = utc_now()
+        run.updated_at = utc_now()
+        if document is not None:
+            if run.operation == "delete":
+                # 删除未执行时保留原有索引；有分块即恢复 indexed，否则恢复 failed。
+                document.status = "indexed" if document.chunk_count > 0 else "failed"
+            else:
+                document.status = "indexed" if document.chunk_count > 0 else "pending"
+            document.updated_at = utc_now()
+            db.add(document)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return run
 
     def retry_failed(self, db: Session, run_id: str) -> IngestionRun:
         """把已失败任务复制为新的待执行任务，保留原任务用于审计。"""
@@ -144,11 +215,19 @@ class IngestionQueueService:
                 text(
                     """
                     UPDATE knowledge.knowledge_documents
-                    SET status = 'indexing', error_message = NULL, updated_at = NOW()
+                    SET status = CASE
+                            WHEN :operation = 'delete' THEN 'deleting'
+                            ELSE 'indexing'
+                        END,
+                        error_message = NULL,
+                        updated_at = NOW()
                     WHERE id = :document_id
                     """
                 ),
-                {"document_id": row["document_id"]},
+                {
+                    "document_id": row["document_id"],
+                    "operation": row["operation"],
+                },
             )
             db.commit()
             return IngestionRun.model_validate(dict(row))
@@ -181,7 +260,7 @@ class IngestionQueueService:
                     SET status = 'completed', completed_at = NOW(), updated_at = NOW(),
                         heartbeat_at = NOW(), error_message = NULL
                     WHERE run_id = :run_id AND worker_id = :worker_id AND status = 'running'
-                    RETURNING document_id
+                    RETURNING document_id, operation
                     """
                 ),
                 {"run_id": run_id, "worker_id": worker_id},
@@ -193,12 +272,27 @@ class IngestionQueueService:
                 text(
                     """
                     UPDATE knowledge.knowledge_documents
-                    SET status = 'indexed', error_message = NULL,
-                        indexed_at = NOW(), updated_at = NOW()
+                    SET status = CASE
+                            WHEN :operation = 'delete' THEN 'deleted'
+                            ELSE 'indexed'
+                        END,
+                        error_message = NULL,
+                        indexed_at = CASE
+                            WHEN :operation = 'delete' THEN NULL
+                            ELSE NOW()
+                        END,
+                        chunk_count = CASE
+                            WHEN :operation = 'delete' THEN 0
+                            ELSE chunk_count
+                        END,
+                        updated_at = NOW()
                     WHERE id = :document_id
                     """
                 ),
-                {"document_id": row["document_id"]},
+                {
+                    "document_id": row["document_id"],
+                    "operation": row["operation"],
+                },
             )
             db.commit()
 
@@ -225,7 +319,7 @@ class IngestionQueueService:
                 run.worker_id = None
                 run.heartbeat_at = None
                 final_status = "pending"
-                document_status = "pending"
+                document_status = "deleting" if run.operation == "delete" else "pending"
             else:
                 run.status = "failed"
                 run.completed_at = utc_now()

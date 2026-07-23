@@ -70,6 +70,17 @@ class MilvusVectorStoreService:
             timeout=settings.milvus_write_timeout,
         )
 
+    async def delete_file_vectors_if_exists(self, collection_name: str, file_id: str) -> bool:
+        """幂等删除文件向量；Collection 已不存在时直接返回 False。"""
+        await self._ensure_connection()
+        if not await asyncio.to_thread(self._has_collection_sync, collection_name):
+            return False
+        await asyncio.wait_for(
+            asyncio.to_thread(self._delete_file_vectors_sync, collection_name, file_id),
+            timeout=settings.milvus_write_timeout,
+        )
+        return True
+
     async def flush_collection(self, collection_name: str) -> None:
         """刷新 Collection，使本批写入在任务完成前稳定可见。"""
         await self._ensure_connection()

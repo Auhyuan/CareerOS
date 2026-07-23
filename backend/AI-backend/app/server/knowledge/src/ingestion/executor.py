@@ -37,7 +37,10 @@ class IngestionExecutor:
         self.chunk_repository = KnowledgeChunkRepository()
 
     async def execute(self, run: IngestionRun) -> None:
-        """执行单个已被 Worker 抢占的入库任务。"""
+        """按照任务类型执行入库、重新索引或文档删除。"""
+        if run.operation == "delete":
+            await self._execute_delete(run)
+            return
         if run.operation not in {"ingest", "reindex"}:
             raise ValueError(f"当前执行器暂不支持任务类型: {run.operation}")
 
@@ -172,6 +175,41 @@ class IngestionExecutor:
                 # 否则任务显示失败但残留向量仍可能被检索到。
                 await self._cleanup_file_vectors(knowledge.collection_name, run)
                 raise
+
+    async def _execute_delete(self, run: IngestionRun) -> None:
+        """幂等删除文档向量和 PostgreSQL 分块证据。"""
+        with get_db_session() as db:
+            knowledge = db.exec(
+                select(KnowledgeBase).where(KnowledgeBase.knowledge_id == run.knowledge_id)
+            ).first()
+            document = db.get(KnowledgeDocument, run.document_id)
+            if knowledge is None:
+                raise ValueError(f"删除任务关联的知识库不存在: {run.knowledge_id}")
+            if document is None:
+                # 文档关系已被级联删除时，删除目标已经达成。
+                return
+            collection_name = knowledge.collection_name
+            document_id = int(document.id)
+
+        # Milvus 删除和 PostgreSQL 删除无法放在同一事务中。
+        # 先幂等删除向量，再删除证据；任一步失败都可由同一个任务安全重试。
+        await vector_store_service.delete_file_vectors_if_exists(
+            collection_name=collection_name,
+            file_id=run.file_id,
+        )
+
+        with get_db_session() as db:
+            current_document = db.get(KnowledgeDocument, document_id)
+            if current_document is None:
+                return
+            self.chunk_repository.delete_document_chunks(db, document_id)
+            current_document.chunk_count = 0
+            current_document.index_config = {}
+            current_document.indexed_at = None
+            current_document.error_message = None
+            current_document.updated_at = utc_now()
+            db.add(current_document)
+            db.commit()
 
     @staticmethod
     async def _cleanup_file_vectors(collection_name: str, run: IngestionRun) -> None:

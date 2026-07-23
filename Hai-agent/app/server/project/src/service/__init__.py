@@ -1,0 +1,3 @@
+from app.server.project.src.service.project_service import ProjectService
+
+__all__ = ["ProjectService"]

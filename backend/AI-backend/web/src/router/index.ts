@@ -93,6 +93,20 @@ const routes = [
     component: () => import('@/views/knowledge/KnowledgeForm.vue'),
     meta: { layout: 'default', title: '新建知识库' },
   },
+  // 8.2 知识库详情工作台
+  {
+    path: '/knowledge/:knowledge_id',
+    name: 'KnowledgeDetail',
+    component: () => import('@/views/knowledge/KnowledgeDetail.vue'),
+    meta: { layout: 'default', title: '知识库详情' },
+  },
+  // 8.3 编辑知识库
+  {
+    path: '/knowledge/:knowledge_id/edit',
+    name: 'KnowledgeEdit',
+    component: () => import('@/views/knowledge/KnowledgeForm.vue'),
+    meta: { layout: 'default', title: '编辑知识库' },
+  },
   // 9. 工具管理
   {
     path: '/tools',
