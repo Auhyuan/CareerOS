@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     app_port: int = Field(default=8093, ge=1, le=65535)
     app_reload: bool = Field(default=True)
 
+    ai_backend_base_url: str = Field(default="http://127.0.0.1:8090")
+    ai_backend_connect_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    ai_backend_timeout_seconds: float = Field(default=900.0, gt=0, le=3600)
+
     postgres_host: str = Field(default="127.0.0.1")
     postgres_port: int = Field(default=5433, ge=1, le=65535)
     postgres_user: str = Field(default="remote_root")

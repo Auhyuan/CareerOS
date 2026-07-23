@@ -16,7 +16,7 @@
     "a2a": null,
     "context_summarization": null,
     "runtime_options": {
-      "model_code": "chat_main",
+      "model_code": "HK-llm-chatmodel",
       "temperature": 0.2,
       "timeout_seconds": 600,
       "max_retries": 2

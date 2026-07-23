@@ -18,7 +18,7 @@
 
 每个阶段 JSON 都是 `POST http://127.0.0.1:8090/agent/templates/upsert` 的完整请求体，可以直接调用接口创建或覆盖同名模板。导入前需要确保：
 
-1. AI-backend 已存在 `chat_main` 聊天模型配置；如模型编码不同，统一修改五个文件中的 `runtime_options.model_code`。
+1. AI-backend 已存在 `HK-llm-chatmodel` 聊天模型配置；如模型编码不同，统一修改五个文件中的 `runtime_options.model_code`。
 2. Hai-agent MCP 服务已经在 AI-backend 同步，并且 `save_stage_result` 的平台工具编码为 `hai.save_stage_result`；如果同步时使用了其他前缀，需要同步修改五个文件中的 `tools`。
 3. Hai-agent 的 `.env` 中五个阶段 Agent ID 与 `manifest.json` 保持一致。
 

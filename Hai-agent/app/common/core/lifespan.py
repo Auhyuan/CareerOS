@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.common.config.settings import get_settings
 from app.common.db.postgres import check_postgres_health
+from app.server.workflow.src.client import close_ai_backend_agent_client
 
 
 @asynccontextmanager
@@ -25,4 +26,8 @@ async def app_lifespan(app: FastAPI):
         if mcp_lifespan is not None:
             await stack.enter_async_context(mcp_lifespan(mcp_app))
             print("Hai-agent MCP 服务生命周期已启动")
-        yield
+        try:
+            yield
+        finally:
+            # 关闭到 AI-backend 的共享连接池，避免服务重载后残留连接。
+            await close_ai_backend_agent_client()

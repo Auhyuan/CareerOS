@@ -12,6 +12,10 @@
 - 通用 JSON 阶段结果保存
 - 用户确认后推进到下一节点
 - 每个步骤节点独立 `agent_thread_id`
+- 根据当前节点自动调用对应的 AI-backend Agent 模板
+- 支持 SSE 流式转发、附件和知识库范围透传
+- Agent 通过 MCP 自动保存当前阶段结果
+- 支持从历史节点创建独立方案分支
 
 ## 初始化
 
@@ -74,6 +78,46 @@ FEEDBACK_REVISION_AGENT_ID
 ```
 
 `POST /workflow/nodes/advance` 只接收 `node_id` 和 `expected_result_version`。
+
+
+## 节点 Agent 调用
+
+前端统一调用：
+
+```http
+POST /workflow/nodes/messages
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "node_id": "当前节点 UUID",
+  "message": "请根据我上传的 Brief 整理项目准备清单",
+  "message_type": "text",
+  "payload": {},
+  "stream": true,
+  "file_ids": [],
+  "knowledge_base_ids": []
+}
+```
+
+Hai-agent 会自动完成：
+
+1. 根据 Access Token 校验节点和项目归属。
+2. 读取节点绑定的 `agent_id` 和独立 `agent_thread_id`。
+3. 组装 `project_context`、`previous_stage_result` 和 `current_stage_result`。
+4. 注入 MCP 保存所需的用户、项目、分支、节点、阶段和结果版本。
+5. 调用 AI-backend `/agent/messages`，流式模式下原样转发 SSE。
+6. 阶段 Agent 确认结果后调用 `save_stage_result`，节点状态变为 `ready`。
+7. 用户调用 `/workflow/nodes/advance` 进入下一阶段。
+
+启动完整链路前，必须先将 `agent_configs` 中的五个模板导入 AI-backend，并把 Hai-agent MCP 工具同步为 `hai.save_stage_result`。
+
+
+## 历史节点创建分支
+
+调用 `POST /workflow/branches/create` 可以从 `ready` 或 `completed` 历史节点派生新分支。新节点复制业务结果作为修改基线，但使用全新的 `agent_thread_id`，不会复用原节点 Checkpoint。详细规则见 [历史节点创建分支](docs/历史节点创建分支.md)。
 
 ## MCP 工作流工具
 

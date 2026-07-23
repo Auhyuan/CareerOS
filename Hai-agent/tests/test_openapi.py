@@ -18,8 +18,10 @@ class OpenApiTestCase(unittest.TestCase):
             "/projects/create",
             "/projects/search",
             "/projects/detail",
+            "/workflow/nodes/messages",
             "/workflow/nodes/save-result",
             "/workflow/nodes/advance",
+            "/workflow/branches/create",
         }
         self.assertFalse(required.difference(paths))
 

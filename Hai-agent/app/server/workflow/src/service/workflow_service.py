@@ -5,11 +5,13 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 
 from app.common.core.exceptions import BusinessException
-from app.server.project.src.schemas.project_schemas import NodeResponse
-from app.server.workflow.src.config.stage_config import get_next_stage_definition
-from app.server.workflow.src.models.workflow_models import WorkflowNodeModel
+from app.server.project.src.schemas.project_schemas import BranchResponse, NodeResponse
+from app.server.workflow.src.config.stage_config import get_next_stage_definition, get_stage_definition
+from app.server.workflow.src.models.workflow_models import WorkflowBranchModel, WorkflowNodeModel
 from app.server.workflow.src.repository.workflow_repository import WorkflowRepository
 from app.server.workflow.src.schemas.workflow_schemas import (
+    BranchCreateRequest,
+    BranchCreateResponse,
     NodeAdvanceRequest,
     NodeAdvanceResponse,
     StageResultSaveRequest,
@@ -105,6 +107,75 @@ class WorkflowService:
             can_advance=can_advance,
         )
 
+    def create_branch_from_node(
+        self,
+        db: Session,
+        user_id: UUID,
+        request: BranchCreateRequest,
+    ) -> BranchCreateResponse:
+        """从历史节点复制业务基线，创建独立分支和全新 Agent 会话节点。"""
+        source_node = self.repository.get_owned_node_for_update(db, user_id, request.source_node_id)
+        if source_node is None:
+            raise BusinessException(404, "来源节点不存在")
+        if source_node.status not in {"ready", "completed"}:
+            raise BusinessException(409, "只有已保存稳定结果的节点才能创建新分支")
+        if not source_node.result_data or source_node.result_version < 1:
+            raise BusinessException(409, "来源节点尚未保存阶段结果，不能创建新分支")
+        if source_node.result_version != request.expected_result_version:
+            raise BusinessException(409, f"节点结果版本已变化，当前版本为 {source_node.result_version}")
+
+        source_branch = self.repository.get_branch_for_update(db, source_node.branch_id)
+        project = self.repository.get_project_for_update(db, source_node.project_id, user_id)
+        if source_branch is None or project is None:
+            raise BusinessException(404, "项目或来源分支不存在")
+        if source_branch.project_id != source_node.project_id:
+            raise BusinessException(409, "来源分支与节点所属项目不匹配")
+        if project.status != "active":
+            raise BusinessException(409, "非活动项目不能创建新分支")
+
+        # 新分支从来源节点处产生树状分叉。新节点保留该阶段的业务结果作为修改基线，
+        # 但不复制旧 Checkpoint、运行状态和版本号，避免新旧分支的 Agent 上下文互相污染。
+        stage = get_stage_definition(source_node.stage_code)
+        branch_id = uuid4()
+        node_id = uuid4()
+        branch = WorkflowBranchModel(
+            branch_id=branch_id,
+            project_id=source_node.project_id,
+            name=request.branch_name,
+            source_branch_id=source_branch.branch_id,
+            source_node_id=source_node.node_id,
+            status="active",
+            is_main=False,
+        )
+        node = WorkflowNodeModel(
+            node_id=node_id,
+            project_id=source_node.project_id,
+            branch_id=branch_id,
+            parent_node_id=source_node.node_id,
+            sequence_no=source_node.sequence_no,
+            stage_code=source_node.stage_code,
+            status="working",
+            title=stage.title,
+            summary=source_node.summary,
+            input_context=deepcopy(source_node.input_context),
+            result_data=deepcopy(source_node.result_data),
+            handoff_context={},
+            result_version=0,
+            agent_id=stage.agent_id,
+            agent_thread_id=self._build_thread_id(source_node.project_id, node_id),
+        )
+        self.repository.add_branch_with_node(db, branch, node)
+        branch.head_node_id = node.node_id
+        project.current_branch_id = branch.branch_id
+        project.current_node_id = node.node_id
+        project.current_stage = node.stage_code
+        db.commit()
+
+        return BranchCreateResponse(
+            branch=self._branch_response(branch),
+            node=self._node_response(node),
+        )
+
     def advance_node(self, db: Session, user_id: UUID, request: NodeAdvanceRequest) -> NodeAdvanceResponse:
         """冻结 ready 节点，并创建使用全新 Checkpoint 的下一步骤节点。"""
         node = self.repository.get_owned_node_for_update(db, user_id, request.node_id)
@@ -183,6 +254,20 @@ class WorkflowService:
     def _build_thread_id(project_id: UUID, node_id: UUID) -> str:
         """为下一步骤节点生成新的 LangGraph thread_id。"""
         return f"hai:{project_id}:{node_id}:{uuid4().hex}"
+
+    @staticmethod
+    def _branch_response(branch: WorkflowBranchModel) -> BranchResponse:
+        """把分支 ORM 对象转换为接口响应。"""
+        return BranchResponse(
+            branch_id=branch.branch_id,
+            name=branch.name,
+            source_branch_id=branch.source_branch_id,
+            source_node_id=branch.source_node_id,
+            head_node_id=branch.head_node_id,
+            status=branch.status,
+            is_main=branch.is_main,
+            created_at=branch.created_at,
+        )
 
     @staticmethod
     def _node_response(node: WorkflowNodeModel) -> NodeResponse:

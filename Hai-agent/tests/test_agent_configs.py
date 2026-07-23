@@ -45,7 +45,7 @@ class StageAgentConfigTestCase(unittest.TestCase):
                 self.assertIn("hai.save_stage_result", payload["config"]["tools"])
                 self.assertEqual(
                     payload["config"]["runtime_options"]["model_code"],
-                    "chat_main",
+                    "HK-llm-chatmodel",
                 )
 
 
