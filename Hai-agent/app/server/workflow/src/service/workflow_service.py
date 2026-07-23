@@ -31,15 +31,68 @@ class WorkflowService:
         node = self.repository.get_owned_node_for_update(db, user_id, request.node_id)
         if node is None:
             raise BusinessException(404, "节点不存在")
+        return self._save_locked_stage_result(
+            db,
+            node,
+            result=request.result,
+            result_summary=request.result_summary,
+            expected_version=request.expected_version,
+        )
+
+    def save_stage_result_from_runtime(
+        self,
+        db: Session,
+        *,
+        user_id: UUID,
+        project_id: UUID,
+        branch_id: UUID,
+        node_id: UUID,
+        stage_code: str,
+        expected_version: int,
+        result: dict,
+        result_summary: str | None,
+    ) -> StageResultSaveResponse:
+        """使用系统运行上下文保存阶段结果，并校验完整节点归属。
+
+        该入口供 MCP 工具使用。业务标识由 AI-backend 从 Runtime Context
+        注入，模型只负责生成 result 和 result_summary。
+        """
+        node = self.repository.get_owned_node_for_update(db, user_id, node_id)
+        if node is None:
+            raise BusinessException(404, "节点不存在")
+        if node.project_id != project_id:
+            raise BusinessException(409, "运行上下文中的项目与节点不匹配")
+        if node.branch_id != branch_id:
+            raise BusinessException(409, "运行上下文中的分支与节点不匹配")
+        if node.stage_code != stage_code:
+            raise BusinessException(409, "运行上下文中的阶段与节点不匹配")
+        return self._save_locked_stage_result(
+            db,
+            node,
+            result=result,
+            result_summary=result_summary,
+            expected_version=expected_version,
+        )
+
+    @staticmethod
+    def _save_locked_stage_result(
+        db: Session,
+        node: WorkflowNodeModel,
+        *,
+        result: dict,
+        result_summary: str | None,
+        expected_version: int,
+    ) -> StageResultSaveResponse:
+        """更新已加行锁的节点结果，并执行状态和版本校验。"""
         if node.status in {"completed", "cancelled"}:
             raise BusinessException(409, "已完成或已取消的节点不能更新结果")
-        if node.result_version != request.expected_version:
+        if node.result_version != expected_version:
             raise BusinessException(409, f"节点结果已更新，当前版本为 {node.result_version}")
 
         # 第一版先执行通用非空校验；后续由阶段配置的 output_schema 扩展细粒度校验。
-        can_advance = bool(request.result)
-        node.result_data = deepcopy(request.result)
-        node.summary = request.result_summary
+        can_advance = bool(result)
+        node.result_data = deepcopy(result)
+        node.summary = result_summary
         node.result_version += 1
         node.result_updated_at = datetime.now(timezone.utc)
         node.status = "ready" if can_advance else "working"

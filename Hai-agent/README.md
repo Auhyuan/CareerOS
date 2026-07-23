@@ -74,3 +74,12 @@ FEEDBACK_REVISION_AGENT_ID
 ```
 
 `POST /workflow/nodes/advance` 只接收 `node_id` 和 `expected_result_version`。
+
+## MCP 工作流工具
+
+Hai-agent 将 FastMCP 挂载在 http://127.0.0.1:8093/mcp/，当前提供：
+
+- save_stage_result：保存当前节点的通用 JSON 阶段结果。
+
+模型只填写 result 和 summary。项目、分支、节点、阶段、用户与结果版本由 AI-backend
+从 Agent Runtime Context 生成短期签名令牌，并通过 X-Agent-Runtime-Context 请求头传入。

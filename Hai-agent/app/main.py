@@ -16,6 +16,7 @@ from app.common.core.exceptions import register_exception_handlers
 from app.common.core.lifespan import app_lifespan
 from app.common.schemas.result import Result
 from app.server.auth.api import router as auth_router
+from app.server.mcp.server import create_mcp_asgi_app
 from app.server.project.api import router as project_router
 from app.server.workflow.api import router as workflow_router
 
@@ -41,6 +42,12 @@ def create_app() -> FastAPI:
     application.include_router(project_router, prefix="/projects", tags=["项目管理"])
     application.include_router(workflow_router, prefix="/workflow", tags=["工作流"])
 
+    # MCP 属于 Hai-agent 对外提供的业务工具能力。保存子应用引用，
+    # 由父应用 lifespan 统一启动其 Streamable HTTP 会话管理器。
+    mcp_app = create_mcp_asgi_app()
+    application.state.mcp_app = mcp_app
+    application.mount(settings.mcp_mount_path, mcp_app)
+
     @application.get("/", response_model=Result[dict], summary="服务健康信息")
     def root_endpoint() -> Result[dict]:
         """返回不依赖鉴权的基础服务状态。"""
@@ -54,7 +61,7 @@ def print_startup_banner() -> None:
     settings = get_settings()
     print("=" * 72)
     print(f"Hai-agent 后端启动: http://{settings.app_host}:{settings.app_port}")
-    print("公开模块: /auth、/projects、/workflow")
+    print(f"公开模块: /auth、/projects、/workflow、{settings.mcp_mount_path}")
     print("接口文档: /docs")
     print("=" * 72)
 

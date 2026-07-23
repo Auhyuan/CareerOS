@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     proposal_generation_agent_id: str | None = Field(default=None)
     feedback_revision_agent_id: str | None = Field(default=None)
 
+    mcp_service_name: str = Field(default="hai-agent-workflow-tools")
+    mcp_mount_path: str = Field(default="/mcp")
+    mcp_transport_path: str = Field(default="/")
+    mcp_runtime_context_secret: str = Field(default="replace-with-a-long-random-mcp-context-secret")
+    mcp_runtime_context_algorithm: str = Field(default="HS256")
+    mcp_runtime_context_issuer: str = Field(default="ai-backend")
+    mcp_runtime_context_audience: str = Field(default="hai-agent-mcp")
+
     cors_origins: str = Field(default="http://127.0.0.1:5173,http://localhost:5173")
 
     @property
