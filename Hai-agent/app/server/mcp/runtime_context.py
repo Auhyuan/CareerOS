@@ -1,22 +1,28 @@
-"""解析 AI-backend 随 MCP 请求传入的可信运行上下文。"""
+"""解析 AI-backend 随 MCP 请求传入的内部运行上下文。"""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
-import jwt
 from fastmcp.server.dependencies import get_http_headers
-from jwt import InvalidTokenError
 
-from app.common.config.settings import get_settings
 from app.common.core.exceptions import BusinessException
 
 
-RUNTIME_CONTEXT_HEADER = "x-agent-runtime-context"
+RUNTIME_CONTEXT_HEADERS: dict[str, str] = {
+    "user_id": "x-agent-user-id",
+    "project_id": "x-agent-project-id",
+    "branch_id": "x-agent-branch-id",
+    "node_id": "x-agent-node-id",
+    "stage_code": "x-agent-stage-code",
+    "expected_result_version": "x-agent-expected-result-version",
+}
+RUN_ID_HEADER = "x-agent-run-id"
 
 
 @dataclass(frozen=True)
 class MCPRuntimeContext:
-    """保存 MCP 工具执行所需的可信业务标识。"""
+    """保存 MCP 工具执行所需的内部业务标识。"""
 
     user_id: UUID
     project_id: UUID
@@ -28,46 +34,39 @@ class MCPRuntimeContext:
 
 
 def get_mcp_runtime_context() -> MCPRuntimeContext:
-    """从当前 MCP HTTP 请求读取并验证签名运行上下文。"""
-    headers = get_http_headers(include_all=True)
-    token = str(headers.get(RUNTIME_CONTEXT_HEADER) or "").strip()
-    if not token:
-        raise BusinessException(401, f"MCP 请求缺少 {RUNTIME_CONTEXT_HEADER} 请求头")
-    return decode_mcp_runtime_context(token)
+    """从当前 MCP HTTP 请求读取并校验内部运行上下文。"""
+    return parse_mcp_runtime_context(get_http_headers(include_all=True))
 
 
-def decode_mcp_runtime_context(token: str) -> MCPRuntimeContext:
-    """验证运行上下文 JWT，并转换为强类型业务上下文。"""
-    settings = get_settings()
-    try:
-        payload = jwt.decode(
-            token,
-            settings.mcp_runtime_context_secret,
-            algorithms=[settings.mcp_runtime_context_algorithm],
-            issuer=settings.mcp_runtime_context_issuer,
-            audience=settings.mcp_runtime_context_audience,
+def parse_mcp_runtime_context(headers: Mapping[str, str]) -> MCPRuntimeContext:
+    """把内部请求头转换为强类型 MCP 运行上下文。"""
+    missing_fields = [
+        field
+        for field, header_name in RUNTIME_CONTEXT_HEADERS.items()
+        if not str(headers.get(header_name) or "").strip()
+    ]
+    if missing_fields:
+        raise BusinessException(
+            401,
+            "MCP 请求缺少运行上下文请求头: " + ", ".join(missing_fields),
         )
-        if payload.get("type") != "mcp_runtime_context":
-            raise BusinessException(401, "MCP 运行上下文令牌类型不正确")
 
-        stage_code = str(payload["stage_code"]).strip()
-        if not stage_code:
-            raise BusinessException(401, "MCP 运行上下文缺少有效阶段编码")
-
-        expected_version = int(payload["expected_result_version"])
+    try:
+        stage_code = str(headers[RUNTIME_CONTEXT_HEADERS["stage_code"]]).strip()
+        expected_version = int(
+            headers[RUNTIME_CONTEXT_HEADERS["expected_result_version"]]
+        )
         if expected_version < 0:
-            raise BusinessException(401, "MCP 运行上下文结果版本不能小于 0")
+            raise ValueError("结果版本不能小于 0")
 
         return MCPRuntimeContext(
-            user_id=UUID(str(payload["user_id"])),
-            project_id=UUID(str(payload["project_id"])),
-            branch_id=UUID(str(payload["branch_id"])),
-            node_id=UUID(str(payload["node_id"])),
+            user_id=UUID(str(headers[RUNTIME_CONTEXT_HEADERS["user_id"]])),
+            project_id=UUID(str(headers[RUNTIME_CONTEXT_HEADERS["project_id"]])),
+            branch_id=UUID(str(headers[RUNTIME_CONTEXT_HEADERS["branch_id"]])),
+            node_id=UUID(str(headers[RUNTIME_CONTEXT_HEADERS["node_id"]])),
             stage_code=stage_code,
             expected_result_version=expected_version,
-            run_id=str(payload.get("run_id") or "").strip() or None,
+            run_id=str(headers.get(RUN_ID_HEADER) or "").strip() or None,
         )
-    except BusinessException:
-        raise
-    except (InvalidTokenError, KeyError, TypeError, ValueError) as error:
-        raise BusinessException(401, "MCP 运行上下文无效或已过期") from error
+    except (KeyError, TypeError, ValueError) as error:
+        raise BusinessException(401, "MCP 运行上下文请求头格式不正确") from error

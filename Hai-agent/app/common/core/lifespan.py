@@ -14,14 +14,6 @@ async def app_lifespan(app: FastAPI):
     insecure_secrets = {"change-this-secret-before-startup", "replace-with-a-long-random-secret"}
     if settings.jwt_secret_key in insecure_secrets or len(settings.jwt_secret_key) < 32:
         raise RuntimeError("JWT_SECRET_KEY 尚未安全配置，请在 .env 中设置至少 32 字节的随机值")
-    if (
-        settings.mcp_runtime_context_secret == "replace-with-a-long-random-mcp-context-secret"
-        or len(settings.mcp_runtime_context_secret) < 32
-    ):
-        raise RuntimeError(
-            "MCP_RUNTIME_CONTEXT_SECRET 尚未安全配置，请在 .env 中设置至少 32 字节的共享密钥"
-        )
-
     check_postgres_health()
     print(f"PostgreSQL 健康检查通过: database={settings.postgres_database}, schema={settings.postgres_schema}")
 

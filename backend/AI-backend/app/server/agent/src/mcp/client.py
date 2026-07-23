@@ -3,6 +3,8 @@ from typing import Any
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
+from app.server.agent.src.mcp.runtime_context_interceptor import MCPRuntimeContextInterceptor
+
 
 @dataclass(frozen=True)
 class MCPConnectionConfig:
@@ -33,4 +35,7 @@ def build_mcp_connection_config(connection: MCPConnectionConfig) -> dict[str, An
 def create_multi_server_client(connections: list[MCPConnectionConfig]) -> MultiServerMCPClient:
     """根据 MCP 连接配置创建 MultiServerMCPClient。"""
     server_configs = {connection.key: build_mcp_connection_config(connection) for connection in connections}
-    return MultiServerMCPClient(server_configs)
+    return MultiServerMCPClient(
+        server_configs,
+        tool_interceptors=[MCPRuntimeContextInterceptor()],
+    )

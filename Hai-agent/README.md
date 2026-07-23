@@ -82,4 +82,8 @@ Hai-agent 将 FastMCP 挂载在 http://127.0.0.1:8093/mcp/，当前提供：
 - save_stage_result：保存当前节点的通用 JSON 阶段结果。
 
 模型只填写 result 和 summary。项目、分支、节点、阶段、用户与结果版本由 AI-backend
-从 Agent Runtime Context 生成短期签名令牌，并通过 X-Agent-Runtime-Context 请求头传入。
+从 Agent Runtime Context 读取业务标识，并通过 X-Agent-* 内部请求头传入。
+
+## 阶段 Agent 模板备份
+
+五个工作流阶段的完整 Agent 模板保存在 [`agent_configs`](agent_configs/README.md) 目录。该目录是数据库模板的数据恢复源，包含稳定 Agent ID、系统提示词、工具和模型运行配置。

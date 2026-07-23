@@ -1,66 +1,59 @@
 import asyncio
 import unittest
-from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-import jwt
-
-from app.common.config.settings import get_settings
 from app.common.core.exceptions import BusinessException
-from app.server.mcp.runtime_context import decode_mcp_runtime_context
+from app.server.mcp.runtime_context import (
+    RUNTIME_CONTEXT_HEADERS,
+    RUN_ID_HEADER,
+    parse_mcp_runtime_context,
+)
 from app.server.mcp.server import create_mcp_server
 from app.server.workflow.src.service.workflow_service import WorkflowService
 
 
 class MCPRuntimeContextTests(unittest.TestCase):
-    """验证 MCP 工具 Schema、签名上下文和节点边界。"""
+    """验证 MCP 工具 Schema、请求头上下文和节点边界。"""
 
-    def _build_token(self, **overrides) -> tuple[str, dict]:
-        """创建测试用短期 MCP 运行上下文令牌。"""
-        settings = get_settings()
-        now = datetime.now(timezone.utc)
-        payload = {
-            "type": "mcp_runtime_context",
+    @staticmethod
+    def _build_headers(**overrides) -> tuple[dict[str, str], dict[str, str]]:
+        """创建测试用 MCP 运行上下文请求头。"""
+        values = {
             "user_id": str(uuid4()),
             "project_id": str(uuid4()),
             "branch_id": str(uuid4()),
             "node_id": str(uuid4()),
             "stage_code": "project_preparation",
-            "expected_result_version": 0,
-            "run_id": "test-run",
-            "iat": now,
-            "nbf": now,
-            "exp": now + timedelta(minutes=5),
-            "iss": settings.mcp_runtime_context_issuer,
-            "aud": settings.mcp_runtime_context_audience,
+            "expected_result_version": "0",
         }
-        payload.update(overrides)
-        token = jwt.encode(
-            payload,
-            settings.mcp_runtime_context_secret,
-            algorithm=settings.mcp_runtime_context_algorithm,
-        )
-        return token, payload
+        values.update({key: str(value) for key, value in overrides.items()})
+        headers = {
+            header_name: values[field]
+            for field, header_name in RUNTIME_CONTEXT_HEADERS.items()
+        }
+        headers[RUN_ID_HEADER] = "test-run"
+        return headers, values
 
-    def test_decode_runtime_context(self) -> None:
-        """有效签名上下文应完整还原业务标识。"""
-        token, payload = self._build_token()
-        context = decode_mcp_runtime_context(token)
+    def test_parse_runtime_context_headers(self) -> None:
+        """有效请求头应完整还原强类型业务上下文。"""
+        headers, values = self._build_headers()
+        context = parse_mcp_runtime_context(headers)
 
-        self.assertEqual(str(context.user_id), payload["user_id"])
-        self.assertEqual(str(context.project_id), payload["project_id"])
-        self.assertEqual(str(context.node_id), payload["node_id"])
+        self.assertEqual(str(context.user_id), values["user_id"])
+        self.assertEqual(str(context.project_id), values["project_id"])
+        self.assertEqual(str(context.node_id), values["node_id"])
         self.assertEqual(context.expected_result_version, 0)
         self.assertEqual(context.run_id, "test-run")
 
-    def test_reject_wrong_runtime_context_type(self) -> None:
-        """错误类型令牌不能被当作 MCP 运行上下文使用。"""
-        token, _ = self._build_token(type="access")
+    def test_reject_missing_runtime_context_header(self) -> None:
+        """缺少节点请求头时不能构造 MCP 运行上下文。"""
+        headers, _ = self._build_headers()
+        del headers[RUNTIME_CONTEXT_HEADERS["node_id"]]
 
         with self.assertRaises(BusinessException):
-            decode_mcp_runtime_context(token)
+            parse_mcp_runtime_context(headers)
 
     def test_tool_schema_hides_business_identifiers(self) -> None:
         """模型只能看到结果和摘要，不能填写节点归属字段。"""

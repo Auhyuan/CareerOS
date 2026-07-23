@@ -1,0 +1,37 @@
+{
+  "version": "1.0.0",
+  "description": "Hai-agent 五阶段 Agent 模板恢复清单",
+  "mcp_tool_code": "hai.save_stage_result",
+  "templates": [
+    {
+      "sequence": 1,
+      "stage_code": "project_preparation",
+      "agent_id": "hai-project-preparation-agent",
+      "file": "01_project_preparation_agent.json"
+    },
+    {
+      "sequence": 2,
+      "stage_code": "requirement_confirmation",
+      "agent_id": "hai-requirement-confirmation-agent",
+      "file": "02_requirement_confirmation_agent.json"
+    },
+    {
+      "sequence": 3,
+      "stage_code": "creative_direction",
+      "agent_id": "hai-creative-direction-agent",
+      "file": "03_creative_direction_agent.json"
+    },
+    {
+      "sequence": 4,
+      "stage_code": "proposal_generation",
+      "agent_id": "hai-proposal-generation-agent",
+      "file": "04_proposal_generation_agent.json"
+    },
+    {
+      "sequence": 5,
+      "stage_code": "feedback_revision",
+      "agent_id": "hai-feedback-revision-agent",
+      "file": "05_feedback_revision_agent.json"
+    }
+  ]
+}
