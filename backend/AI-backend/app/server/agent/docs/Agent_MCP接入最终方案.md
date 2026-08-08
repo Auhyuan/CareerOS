@@ -79,12 +79,12 @@ Agent 平台需要支持外部能力以 MCP 工具的形式热插拔接入。平
 
 ## Runtime Context 自动注入
 
-需要项目、节点、用户归属等系统业务上下文的 MCP 工具，不允许模型填写这些字段。
 AI-backend 通过 langchain-mcp-adapters 的 ToolCallInterceptor 读取
-ToolRuntime.context.inputs，仅提取工具白名单声明的字段，并写入 `X-Agent-*` 内部请求头。
-远程 MCP 工具读取请求头后，仍需结合数据库校验用户、项目、分支和节点归属。
+`ToolRuntime.context.inputs`，不识别具体工具名，也不维护字段白名单，而是把完整
+`inputs` 编码后写入统一的 `X-Agent-Runtime-Inputs` 请求头。嵌套对象、数组和中文
+会使用紧凑 JSON 与 URL-safe Base64 传输。
 
-当前 `save_stage_result` 使用 `user_id`、`project_id`、`branch_id`、`node_id`、
-`stage_code`、`expected_result_version`，并可选携带 `run_id`。模型侧工具 Schema
-只包含 `result` 和 `summary`。该方案适用于受信任内网；若未来 MCP 对公网开放，
-应在网关层增加统一服务认证，而不是让 Agent 或模型生成鉴权参数。
+MCP 服务负责解码完整 `inputs`，每个工具再自行读取和校验需要的字段。例如
+`save_stage_result` 从中读取 `user_id`、`project_id`、`branch_id`、`node_id`
+和 `stage_code`，模型侧公开 Schema 仍然只包含 `result` 和 `summary`。
+脱离 Agent Runtime 的工具管理页测试不会强制注入该请求头。

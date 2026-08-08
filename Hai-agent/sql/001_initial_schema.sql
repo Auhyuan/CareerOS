@@ -133,7 +133,7 @@ CREATE TABLE hai_agent.workflow_nodes (
     handoff_context JSONB NOT NULL DEFAULT '{}'::jsonb,
     result_version INTEGER NOT NULL DEFAULT 0,
     agent_id VARCHAR(100),
-    agent_thread_id VARCHAR(150),
+    agent_thread_id VARCHAR(36),
     checkpoint_id VARCHAR(255),
     error_code VARCHAR(100),
     error_message TEXT,

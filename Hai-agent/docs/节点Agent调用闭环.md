@@ -44,14 +44,13 @@ Hai-agent 不允许前端直接提交 Runtime Context。系统根据数据库中
   "branch_id": "...",
   "node_id": "...",
   "stage_code": "project_preparation",
-  "expected_result_version": 0,
   "project_context": {},
   "previous_stage_result": {},
   "current_stage_result": {}
 }
 ```
 
-其中前六项供 MCP 拦截器使用，后三项供 Agent 模板动态渲染。前端无法覆盖这些字段。
+其中前五项供 MCP 拦截器使用，后三项供 Agent 模板动态渲染。前端无法覆盖这些字段。
 
 ## 会话和节点边界
 

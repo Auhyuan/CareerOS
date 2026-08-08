@@ -1,5 +1,7 @@
-"""为指定 MCP 工具自动注入 Agent Runtime Context 请求头。"""
+"""把 Agent 的完整 inputs 注入所有 MCP 工具请求。"""
 
+import base64
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -9,51 +11,37 @@ from langchain_mcp_adapters.interceptors import (
 )
 
 
-RUNTIME_CONTEXT_TOOL_HEADERS: dict[str, dict[str, str]] = {
-    "save_stage_result": {
-        "user_id": "X-Agent-User-Id",
-        "project_id": "X-Agent-Project-Id",
-        "branch_id": "X-Agent-Branch-Id",
-        "node_id": "X-Agent-Node-Id",
-        "stage_code": "X-Agent-Stage-Code",
-        "expected_result_version": "X-Agent-Expected-Result-Version",
-    },
-}
+RUNTIME_INPUTS_HEADER = "X-Agent-Runtime-Inputs"
 RUN_ID_HEADER = "X-Agent-Run-Id"
 
 
-class MCPRuntimeContextInterceptor:
-    """在指定 MCP 工具调用前注入内部业务上下文。
+def encode_runtime_inputs(inputs: dict[str, Any]) -> str:
+    """把完整 inputs 编码为可安全放入 HTTP 请求头的文本。"""
+    payload = json.dumps(
+        inputs,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
 
-    模型只生成 MCP 工具公开参数。项目、节点和用户归属等字段从
-    LangGraph ToolRuntime.context.inputs 读取，并作为内部 HTTP 请求头传入 MCP 服务。
-    """
+
+class MCPRuntimeContextInterceptor:
+    """为 Agent 发起的 MCP 调用统一透传完整 Runtime Context inputs。"""
 
     async def __call__(
         self,
         request: MCPToolCallRequest,
         handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
     ) -> MCPToolCallResult:
-        """为需要业务上下文的工具写入请求头后继续执行。"""
-        header_mapping = RUNTIME_CONTEXT_TOOL_HEADERS.get(request.name)
-        if not header_mapping:
+        """存在 Agent Runtime Context 时编码完整 inputs，然后继续执行 MCP 工具。"""
+        context = self._get_runtime_context(request)
+        if context is None:
             return await handler(request)
 
-        context = self._get_runtime_context(request)
         inputs = self._get_context_inputs(context)
-        missing_fields = [
-            field for field in header_mapping if inputs.get(field) in (None, "")
-        ]
-        if missing_fields:
-            raise RuntimeError(
-                f"MCP 工具 {request.name} 缺少 Runtime Context inputs: "
-                + ", ".join(missing_fields)
-            )
-
-        # 只注入该工具声明过的白名单字段，避免把整个 inputs 透传给外部服务。
         headers = dict(request.headers or {})
-        for field, header_name in header_mapping.items():
-            headers[header_name] = str(inputs[field])
+        headers[RUNTIME_INPUTS_HEADER] = encode_runtime_inputs(inputs)
 
         run_id = self._get_context_value(context, "run_id")
         if run_id not in (None, ""):
@@ -62,19 +50,18 @@ class MCPRuntimeContextInterceptor:
         return await handler(request.override(headers=headers))
 
     @staticmethod
-    def _get_runtime_context(request: MCPToolCallRequest) -> Any:
-        """从适配器工具请求中取得 LangGraph Runtime Context。"""
+    def _get_runtime_context(request: MCPToolCallRequest) -> Any | None:
+        """从适配器工具请求取得 LangGraph Runtime Context；工具测试可不携带。"""
         runtime = request.runtime
-        context = getattr(runtime, "context", None) if runtime is not None else None
-        if context is None:
-            raise RuntimeError(
-                f"MCP 工具 {request.name} 依赖 Agent Runtime Context，不能脱离 Agent 运行直接调用"
-            )
-        return context
+
+        if runtime is None:
+            return None
+
+        return getattr(runtime, "context", None)
 
     @staticmethod
     def _get_context_inputs(context: Any) -> dict[str, Any]:
-        """兼容字典和 Pydantic Context，提取业务 inputs。"""
+        """兼容字典和 Pydantic Context，提取完整 inputs。"""
         if isinstance(context, dict):
             inputs = context.get("inputs")
         elif hasattr(context, "model_dump"):

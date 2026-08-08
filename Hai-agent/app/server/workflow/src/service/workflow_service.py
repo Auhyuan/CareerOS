@@ -11,6 +11,7 @@ from app.server.workflow.src.models.workflow_models import WorkflowBranchModel, 
 from app.server.workflow.src.repository.workflow_repository import WorkflowRepository
 from app.server.workflow.src.schemas.workflow_schemas import (
     BranchCreateRequest,
+    RootBranchCreateRequest,
     BranchCreateResponse,
     NodeAdvanceRequest,
     NodeAdvanceResponse,
@@ -50,7 +51,6 @@ class WorkflowService:
         branch_id: UUID,
         node_id: UUID,
         stage_code: str,
-        expected_version: int,
         result: dict,
         result_summary: str | None,
     ) -> StageResultSaveResponse:
@@ -73,7 +73,7 @@ class WorkflowService:
             node,
             result=result,
             result_summary=result_summary,
-            expected_version=expected_version,
+            expected_version=None,
         )
 
     @staticmethod
@@ -83,12 +83,12 @@ class WorkflowService:
         *,
         result: dict,
         result_summary: str | None,
-        expected_version: int,
+        expected_version: int | None,
     ) -> StageResultSaveResponse:
         """更新已加行锁的节点结果，并执行状态和版本校验。"""
         if node.status in {"completed", "cancelled"}:
             raise BusinessException(409, "已完成或已取消的节点不能更新结果")
-        if node.result_version != expected_version:
+        if expected_version is not None and node.result_version != expected_version:
             raise BusinessException(409, f"节点结果已更新，当前版本为 {node.result_version}")
 
         # 第一版先执行通用非空校验；后续由阶段配置的 output_schema 扩展细粒度校验。
@@ -105,6 +105,62 @@ class WorkflowService:
             result_version=node.result_version,
             node_status=node.status,
             can_advance=can_advance,
+        )
+
+    def create_branch_from_start(
+        self,
+        db: Session,
+        user_id: UUID,
+        request: RootBranchCreateRequest,
+    ) -> BranchCreateResponse:
+        """从项目虚拟开始节点创建新的项目准备分支和独立 Agent 会话。"""
+        project = self.repository.get_project_for_update(db, request.project_id, user_id)
+        if project is None:
+            raise BusinessException(404, "项目不存在")
+        if project.status != "active":
+            raise BusinessException(409, "非活动项目不能创建新路线")
+
+        stage = get_stage_definition("project_preparation")
+        branch_id = uuid4()
+        node_id = uuid4()
+        branch = WorkflowBranchModel(
+            branch_id=branch_id,
+            project_id=project.project_id,
+            name=request.branch_name,
+            source_branch_id=None,
+            source_node_id=None,
+            status="active",
+            is_main=False,
+        )
+        node = WorkflowNodeModel(
+            node_id=node_id,
+            project_id=project.project_id,
+            branch_id=branch_id,
+            parent_node_id=None,
+            sequence_no=1,
+            stage_code=stage.stage_code,
+            status="working",
+            title=stage.title,
+            summary=None,
+            input_context={},
+            result_data={},
+            handoff_context={},
+            result_version=0,
+            agent_id=stage.agent_id,
+            agent_thread_id=self._build_thread_id(),
+        )
+
+        # 根分支与默认主分支互相独立，创建后立即切换为项目当前路线。
+        self.repository.add_branch_with_node(db, branch, node)
+        branch.head_node_id = node.node_id
+        project.current_branch_id = branch.branch_id
+        project.current_node_id = node.node_id
+        project.current_stage = node.stage_code
+        db.commit()
+
+        return BranchCreateResponse(
+            branch=self._branch_response(branch),
+            node=self._node_response(node),
         )
 
     def create_branch_from_node(
@@ -162,7 +218,7 @@ class WorkflowService:
             handoff_context={},
             result_version=0,
             agent_id=stage.agent_id,
-            agent_thread_id=self._build_thread_id(source_node.project_id, node_id),
+            agent_thread_id=self._build_thread_id(),
         )
         self.repository.add_branch_with_node(db, branch, node)
         branch.head_node_id = node.node_id
@@ -219,7 +275,7 @@ class WorkflowService:
             title=next_stage.title,
             input_context=deepcopy(node.handoff_context),
             agent_id=next_stage.agent_id,
-            agent_thread_id=self._build_thread_id(node.project_id, next_node_id),
+            agent_thread_id=self._build_thread_id(),
             status="working",
         )
         self.repository.add_node(db, next_node)
@@ -251,9 +307,9 @@ class WorkflowService:
         return context
 
     @staticmethod
-    def _build_thread_id(project_id: UUID, node_id: UUID) -> str:
-        """为下一步骤节点生成新的 LangGraph thread_id。"""
-        return f"hai:{project_id}:{node_id}:{uuid4().hex}"
+    def _build_thread_id() -> str:
+        """使用标准 UUID 为下一步骤节点生成独立的 LangGraph thread_id。"""
+        return str(uuid4())
 
     @staticmethod
     def _branch_response(branch: WorkflowBranchModel) -> BranchResponse:

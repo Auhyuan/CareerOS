@@ -61,6 +61,42 @@ class AIBackendAgentClient:
             raise BusinessException(502, "AI-backend Agent 返回缺少有效 data")
         return data
 
+    async def get_conversation_messages(
+        self,
+        conversation_id: str,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """按会话 ID 查询 AI-backend 保存的用户可见历史消息。"""
+        payload = {
+            "conversation_id": conversation_id,
+            "limit": limit,
+        }
+
+        try:
+            response = await self._get_client().post(
+                "/agent/conversations/messages",
+                json=payload,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            logger.exception("AI-backend 会话历史查询失败")
+            raise BusinessException(
+                502,
+                f"AI-backend 会话历史服务不可用: {error}",
+            ) from error
+
+        body = self._parse_json_response(response)
+        if int(body.get("code", 500)) != 0:
+            raise BusinessException(
+                502,
+                f"AI-backend 会话历史查询失败: {body.get('msg') or '未知错误'}",
+            )
+
+        data = body.get("data")
+        if not isinstance(data, dict):
+            raise BusinessException(502, "AI-backend 会话历史返回缺少有效 data")
+        return data
+
     async def stream_message(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         """流式调用 Agent，并把上游 SSE 事件原样转发给前端。"""
         try:

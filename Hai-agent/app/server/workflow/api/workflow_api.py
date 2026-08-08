@@ -15,6 +15,9 @@ from app.server.workflow.src.schemas.workflow_schemas import (
     NodeAdvanceResponse,
     NodeAgentMessageRequest,
     NodeAgentMessageResponse,
+    NodeConversationHistoryRequest,
+    NodeConversationHistoryResponse,
+    RootBranchCreateRequest,
     StageResultSaveRequest,
     StageResultSaveResponse,
 )
@@ -27,6 +30,38 @@ node_agent_service = NodeAgentService()
 ai_backend_agent_client = get_ai_backend_agent_client()
 DbSession = Annotated[Session, Depends(get_db_session)]
 
+
+@router.post(
+    "/nodes/messages/history",
+    response_model=Result[NodeConversationHistoryResponse],
+    summary="查询节点 Agent 历史消息",
+)
+async def get_node_agent_history(
+    request: NodeConversationHistoryRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Result[NodeConversationHistoryResponse]:
+    """校验节点归属，并通过节点绑定的会话 ID 查询 AI 平台历史消息。"""
+    conversation_id = node_agent_service.get_conversation_id(
+        db,
+        current_user.user_id,
+        request.node_id,
+    )
+
+    # 归属关系已经完成校验，后续远程查询不应继续占用本地数据库事务。
+    db.rollback()
+    upstream_data = await ai_backend_agent_client.get_conversation_messages(
+        conversation_id,
+        request.limit,
+    )
+    messages = upstream_data.get("messages")
+
+    response = NodeConversationHistoryResponse(
+        node_id=request.node_id,
+        conversation_id=conversation_id,
+        messages=messages if isinstance(messages, list) else [],
+    )
+    return Result.success(response)
 
 @router.post(
     "/nodes/messages",
@@ -84,6 +119,24 @@ def save_stage_result(
     result = workflow_service.save_stage_result(db, current_user.user_id, request)
     return Result.success(result, msg="节点结果已保存")
 
+
+@router.post(
+    "/branches/create-from-start",
+    response_model=Result[BranchCreateResponse],
+    summary="从项目开始节点创建新路线",
+)
+def create_branch_from_start(
+    request: RootBranchCreateRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Result[BranchCreateResponse]:
+    """从虚拟开始节点创建新的项目准备节点和独立 Agent 会话。"""
+    result = workflow_service.create_branch_from_start(
+        db,
+        current_user.user_id,
+        request,
+    )
+    return Result.success(result, msg="新路线已创建")
 
 @router.post(
     "/branches/create",

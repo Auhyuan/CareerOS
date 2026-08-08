@@ -30,7 +30,7 @@ class ProjectService:
         project_id = uuid4()
         branch_id = uuid4()
         node_id = uuid4()
-        agent_thread_id = self._build_thread_id(project_id, node_id)
+        agent_thread_id = self._build_thread_id()
         initial_stage = get_stage_definition("project_preparation")
 
         project = ProjectModel(
@@ -91,9 +91,9 @@ class ProjectService:
         return self._build_detail(project, branches, nodes)
 
     @staticmethod
-    def _build_thread_id(project_id: UUID, node_id: UUID) -> str:
-        """为步骤节点创建独立且不可复用的 LangGraph thread_id。"""
-        return f"hai:{project_id}:{node_id}:{uuid4().hex}"
+    def _build_thread_id() -> str:
+        """使用标准 UUID 为步骤节点创建独立的 LangGraph thread_id。"""
+        return str(uuid4())
 
     @staticmethod
     def _project_response(project: ProjectModel) -> ProjectResponse:

@@ -49,5 +49,15 @@ class StageAgentConfigTestCase(unittest.TestCase):
                 )
 
 
+    def test_preparation_agent_only_saves_final_confirmed_result(self) -> None:
+        """项目准备 Agent 必须先收集资料，不能在每轮交流后自动保存。"""
+        payload = self._load_json(CONFIG_DIR / "01_project_preparation_agent.json")
+        prompt = payload["config"]["system_prompt"]
+
+        self.assertIn("资料收集过程中", prompt)
+        self.assertIn("不得在每轮对话结束时例行调用保存工具", prompt)
+        self.assertIn("用户明确确认该清单", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

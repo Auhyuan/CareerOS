@@ -131,3 +131,15 @@ Hai-agent 将 FastMCP 挂载在 http://127.0.0.1:8093/mcp/，当前提供：
 ## 阶段 Agent 模板备份
 
 五个工作流阶段的完整 Agent 模板保存在 [`agent_configs`](agent_configs/README.md) 目录。该目录是数据库模板的数据恢复源，包含稳定 Agent ID、系统提示词、工具和模型运行配置。
+
+## Web 前端
+
+Hai-agent 的业务前端位于 `web`，包含登录注册、项目管理、五阶段工作流、历史节点创建分支、节点 Agent 流式对话和附件上传。
+
+```powershell
+cd Hai-agent/web
+npm install
+npm run dev
+```
+
+默认地址为 `http://127.0.0.1:5174`。开发代理会把 `/api` 转发到 Hai-agent 的 `8093` 端口，把 `/ai-api` 转发到 AI-backend 的 `8090` 端口。

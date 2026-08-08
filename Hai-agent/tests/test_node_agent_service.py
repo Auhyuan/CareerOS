@@ -80,7 +80,7 @@ class NodeAgentServiceTestCase(unittest.TestCase):
         self.assertEqual(inputs["branch_id"], str(node.branch_id))
         self.assertEqual(inputs["node_id"], str(node.node_id))
         self.assertEqual(inputs["stage_code"], node.stage_code)
-        self.assertEqual(inputs["expected_result_version"], 2)
+        self.assertNotIn("expected_result_version", inputs)
         self.assertEqual(
             inputs["previous_stage_result"],
             {"activity_goal": "新品发布"},

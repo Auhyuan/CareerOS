@@ -42,6 +42,23 @@ class NodeAdvanceResponse(BaseModel):
     reused_existing_node: bool = False
 
 
+class RootBranchCreateRequest(BaseModel):
+    """从项目虚拟开始节点创建新根分支的参数。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    branch_name: str = Field(min_length=1, max_length=255)
+
+    @field_validator("branch_name")
+    @classmethod
+    def normalize_branch_name(cls, value: str) -> str:
+        """清理根分支名称两侧空白，并拒绝空白名称。"""
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("branch_name 不能为空")
+        return cleaned
+
 class BranchCreateRequest(BaseModel):
     """从历史节点创建独立工作流分支的参数。"""
 
@@ -66,6 +83,36 @@ class BranchCreateResponse(BaseModel):
 
     branch: BranchResponse
     node: NodeResponse
+
+
+class NodeConversationHistoryRequest(BaseModel):
+    """查询工作流节点对应 Agent 会话历史的参数。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: UUID
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class NodeConversationMessage(BaseModel):
+    """前端展示使用的节点 Agent 历史消息。"""
+
+    message_id: str
+    role: str
+    message_type: str
+    content: str | None = None
+    structured_content: dict[str, Any] | None = None
+    tool_name: str | None = None
+    status: str = "success"
+    error_message: str | None = None
+
+
+class NodeConversationHistoryResponse(BaseModel):
+    """节点 Agent 会话历史查询响应。"""
+
+    node_id: UUID
+    conversation_id: str
+    messages: list[NodeConversationMessage] = Field(default_factory=list)
 
 
 class NodeAgentMessageRequest(BaseModel):

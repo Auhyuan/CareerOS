@@ -67,7 +67,7 @@ class WorkflowNodeModel(Base):
     handoff_context: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     result_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     agent_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    agent_thread_id: Mapped[str | None] = mapped_column(String(150), nullable=True, unique=True)
+    agent_thread_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
     checkpoint_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

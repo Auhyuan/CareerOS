@@ -1,0 +1,11 @@
+<script setup lang="ts">
+import {ref} from 'vue'
+import {ArrowRight,CalendarRange,CheckCircle2,GitBranch,Sparkles} from 'lucide-vue-next'
+import {login,register,saveTokens} from '../services/api'
+import type {User} from '../types'
+const emit=defineEmits<{authenticated:[user:User]}>()
+const mode=ref<'login'|'register'>('login'),username=ref(''),password=ref(''),email=ref(''),loading=ref(false),error=ref('')
+/** 提交登录或注册表单。 */
+async function submit():Promise<void>{error.value='';loading.value=true;try{if(mode.value==='register')await register(username.value,password.value,email.value);const tokens=await login(username.value,password.value);saveTokens(tokens);emit('authenticated',tokens.user)}catch(cause){error.value=cause instanceof Error?cause.message:'操作失败'}finally{loading.value=false}}
+</script>
+<template><main class="auth-shell"><section class="auth-story" aria-label="产品能力概览"><div class="brand-mark"><CalendarRange :size="24"/> HAI</div><div class="story-copy"><p class="eyebrow">活动策划协作空间</p><h1>让方案在每一次确认中，逐步成形。</h1><p>从客户 Brief 到方案初稿，每个阶段都有独立 Agent、明确结果和可回溯分支。</p></div><div class="story-points"><div><CheckCircle2 :size="18"/><span>五阶段人机协作流程</span></div><div><GitBranch :size="18"/><span>历史节点随时创建方案分支</span></div><div><Sparkles :size="18"/><span>企业知识与附件按需调用</span></div></div></section><section class="auth-panel"><form class="auth-form" @submit.prevent="submit"><div><p class="eyebrow">欢迎使用</p><h2>{{mode==='login'?'登录策划工作台':'创建本地账号'}}</h2><p class="muted">账号仅用于隔离你的项目和方案分支。</p></div><label>用户名<input v-model="username" autocomplete="username" required minlength="3"/></label><label v-if="mode==='register'">邮箱（选填）<input v-model="email" type="email" autocomplete="email"/></label><label>密码<input v-model="password" type="password" autocomplete="current-password" required minlength="8"/></label><p v-if="error" class="form-error">{{error}}</p><button class="primary wide" type="submit" :disabled="loading">{{loading?'处理中':mode==='login'?'进入工作台':'注册并登录'}}<ArrowRight :size="17"/></button><button class="text-button" type="button" @click="mode=mode==='login'?'register':'login'">{{mode==='login'?'没有账号？立即注册':'已有账号？返回登录'}}</button></form></section></main></template>

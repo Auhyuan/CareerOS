@@ -31,6 +31,23 @@ class NodeAgentService:
         """初始化节点 Agent 服务及其数据仓储。"""
         self.repository = repository or WorkflowRepository()
 
+    def get_conversation_id(
+        self,
+        db: Session,
+        user_id: UUID,
+        node_id: UUID,
+    ) -> str:
+        """校验节点归属并返回该节点绑定的 AI 平台会话 ID。"""
+        owned_context = self.repository.get_owned_node_context(db, user_id, node_id)
+        if owned_context is None:
+            raise BusinessException(404, "节点不存在")
+
+        node, _project = owned_context
+        if not node.agent_thread_id:
+            raise BusinessException(409, "当前节点缺少 Agent 会话标识")
+
+        return str(node.agent_thread_id)
+
     def prepare_message(
         self,
         db: Session,
@@ -115,7 +132,6 @@ class NodeAgentService:
             "branch_id": str(node.branch_id),
             "node_id": str(node.node_id),
             "stage_code": node.stage_code,
-            "expected_result_version": node.result_version,
             "project_context": project_context,
             "previous_stage_result": previous_stage_result,
             "current_stage_result": deepcopy(node.result_data or {}),

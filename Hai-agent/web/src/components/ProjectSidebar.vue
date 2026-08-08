@@ -1,0 +1,10 @@
+<script setup lang="ts">
+import {computed,ref} from 'vue'
+import {CalendarDays,LogOut,Plus,Search} from 'lucide-vue-next'
+import type {Project,User} from '../types'
+const props=defineProps<{projects:Project[];selectedId:string;user:User}>();const emit=defineEmits<{select:[id:string];create:[];logout:[]}>();const query=ref('')
+const filtered=computed(()=>{const keyword=query.value.trim().toLowerCase();return keyword?props.projects.filter((item)=>[item.name,item.customer_name,item.brand_name].some((value)=>value?.toLowerCase().includes(keyword))):props.projects})
+/** 把时间转换为简短中文日期。 */
+function shortDate(value:string):string{return new Intl.DateTimeFormat('zh-CN',{month:'short',day:'numeric'}).format(new Date(value))}
+</script>
+<template><aside class="project-sidebar"><header class="sidebar-brand"><div class="brand-icon"><CalendarDays :size="21"/></div><div><strong>HAI</strong><span>策划工作台</span></div></header><button class="primary wide" type="button" @click="emit('create')"><Plus :size="17"/>新建项目</button><div class="search-box"><Search :size="16"/><input v-model="query" placeholder="搜索项目" aria-label="搜索项目"/></div><div class="project-count">项目 {{filtered.length}}</div><nav class="project-list" aria-label="项目列表"><button v-for="project in filtered" :key="project.project_id" class="project-item" :class="{active:project.project_id===selectedId}" type="button" @click="emit('select',project.project_id)"><span class="project-dot"/><span class="project-text"><strong>{{project.name}}</strong><small>{{project.customer_name||project.brand_name||'内部项目'}}</small></span><time>{{shortDate(project.updated_at)}}</time></button><p v-if="!filtered.length" class="empty-small">还没有匹配的项目</p></nav><footer class="sidebar-user"><div class="avatar">{{user.username.slice(0,1).toUpperCase()}}</div><div><strong>{{user.username}}</strong><span>{{user.email||'本地账号'}}</span></div><button class="icon-button" type="button" title="退出登录" @click="emit('logout')"><LogOut :size="17"/></button></footer></aside></template>

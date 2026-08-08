@@ -29,7 +29,7 @@
 - `project_context`：项目基础信息。
 - `previous_stage_result`：上一节点的最终结果。
 - `current_stage_result`：当前节点已经保存的结果，适合继续修改。
-- `user_id`、`project_id`、`branch_id`、`node_id`、`stage_code`、`expected_result_version`：供 MCP Runtime Context 自动注入，模型无需填写。
+- `user_id`、`project_id`、`branch_id`、`node_id`、`stage_code`：供 MCP Runtime Context 自动注入，模型无需填写。
 
 模板中的 `{{project_context}}`、`{{previous_stage_result}}` 和 `{{current_stage_result}}` 会由 AI-backend 的 PromptService 在 Agent 组装阶段替换。
 
